@@ -8,6 +8,9 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
+// Import Gemini service
+const { detectQuestion, generateQuiz, generateSummary, generateStudentReview } = require('./services/geminiService');
+
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
@@ -167,14 +170,44 @@ const getSession = async (req, res) => {
   }
 };
 
-const detectQuestion = async (req, res) => {
-  // This will be implemented in Phase 2 with Gemini integration
-  res.json({ message: 'Question detection endpoint - to be implemented' });
+const detectQuestionHandler = async (req, res) => {
+  try {
+    const { text } = req.body;
+    
+    if (!text) {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+    
+    console.log('🔍 Detecting question in text:', text);
+    const result = await detectQuestion(text);
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Error in detectQuestion endpoint:', error);
+    res.status(500).json({ error: 'Failed to detect question' });
+  }
 };
 
-const generateQuiz = async (req, res) => {
-  // This will be implemented in Phase 2 with Gemini integration
-  res.json({ message: 'Quiz generation endpoint - to be implemented' });
+const generateQuizHandler = async (req, res) => {
+  try {
+    const { question } = req.body;
+    
+    if (!question) {
+      return res.status(400).json({ error: 'Question is required' });
+    }
+    
+    console.log('🎯 Generating quiz for question:', question);
+    const result = await generateQuiz(question);
+    
+    if (!result) {
+      return res.status(500).json({ error: 'Failed to generate quiz' });
+    }
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Error in generateQuiz endpoint:', error);
+    res.status(500).json({ error: 'Failed to generate quiz' });
+  }
 };
 
 const submitAnswer = async (req, res) => {
@@ -242,10 +275,42 @@ const getAnalytics = async (req, res) => {
 app.post('/api/sessions/create', createSession);
 app.post('/api/sessions/join', joinSession);
 app.get('/api/sessions/:sessionId', getSession);
-app.post('/api/questions/detect', detectQuestion);
-app.post('/api/questions/generate-quiz', generateQuiz);
+app.post('/api/questions/detect', detectQuestionHandler);
+app.post('/api/questions/generate-quiz', generateQuizHandler);
 app.post('/api/answers/submit', submitAnswer);
 app.get('/api/analytics/:sessionId', getAnalytics);
+
+// Generate lecture summary
+app.post('/api/sessions/:sessionId/summary', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    // Get all transcript chunks for the session
+    const transcriptQuery = 'SELECT text_chunk FROM transcripts WHERE session_id = ? ORDER BY timestamp';
+    
+    db.all(transcriptQuery, [sessionId], async (err, transcripts) => {
+      if (err) {
+        console.error('Error getting transcripts:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+      
+      if (transcripts.length === 0) {
+        return res.status(404).json({ error: 'No transcripts found for this session' });
+      }
+      
+      // Combine all transcript chunks
+      const fullTranscript = transcripts.map(t => t.text_chunk).join(' ');
+      
+      // Generate summary using Gemini
+      const summary = await generateSummary(fullTranscript);
+      
+      res.json({ summary });
+    });
+  } catch (error) {
+    console.error('Error generating summary:', error);
+    res.status(500).json({ error: 'Failed to generate summary' });
+  }
+});
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
@@ -319,8 +384,63 @@ io.on('connection', (socket) => {
     db.run('INSERT INTO transcripts (id, session_id, text_chunk) VALUES (?, ?, ?)', 
       [transcriptId, sessionId, text]);
     
-    // TODO: Check for questions using Gemini (Phase 2)
-    // For now, just acknowledge receipt
+    // Check for questions using Gemini
+    try {
+      const questionResult = await detectQuestion(text);
+      
+      if (questionResult.hasQuestion && questionResult.question) {
+        console.log('❓ Question detected:', questionResult.question);
+        
+        // Generate quiz for the detected question
+        const quiz = await generateQuiz(questionResult.question);
+        
+        if (quiz) {
+          // Save question to database
+          const questionId = uuidv4();
+          const questionQuery = `
+            INSERT INTO questions (id, session_id, original_text, formatted_question, 
+                                 option_a, option_b, option_c, option_d, correct_answer)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `;
+          
+          db.run(questionQuery, [
+            questionId, sessionId, text, questionResult.question,
+            quiz.optionA, quiz.optionB, quiz.optionC, quiz.optionD, quiz.correctAnswer
+          ], function(err) {
+            if (err) {
+              console.error('Error saving question to database:', err);
+            } else {
+              console.log('✅ Question saved to database:', questionId);
+              
+              // Emit quiz to all students in the session
+              io.to(sessionId).emit('new-quiz', {
+                questionId,
+                question: questionResult.question,
+                options: {
+                  A: quiz.optionA,
+                  B: quiz.optionB,
+                  C: quiz.optionC,
+                  D: quiz.optionD
+                },
+                correctAnswer: quiz.correctAnswer,
+                timeLimit: 300 // 5 minutes
+              });
+              
+              console.log('📤 Quiz sent to students:', {
+                questionId,
+                question: questionResult.question,
+                correctAnswer: quiz.correctAnswer
+              });
+            }
+          });
+        } else {
+          console.log('❌ Failed to generate quiz for question');
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error processing transcript for questions:', error);
+    }
+    
     socket.emit('transcript-received', { transcriptId });
   });
 

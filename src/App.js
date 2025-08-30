@@ -15,7 +15,7 @@ function App() {
   const isTranscribingRef = useRef(false);
 
   // Your Deepgram API key
-  const DEEPGRAM_API_KEY = '3cc6642a0267111230739ecf52ecc7e1de427d3b';
+  const DEEPGRAM_API_KEY = process.env.REACT_APP_DEEPGRAM_API_KEY;
 
   const startMediaRecorder = (stream, connection) => {
     // Set up MediaRecorder with fallback MIME types
