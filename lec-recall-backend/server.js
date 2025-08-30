@@ -460,6 +460,28 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Quiz timer ends
+  socket.on('quiz-timeout', (data) => {
+    const { questionId, sessionId } = data;
+    console.log('⏰ Quiz timeout for question:', questionId);
+    
+    // Get the correct answer and reveal it to all students
+    db.get('SELECT correct_answer FROM questions WHERE id = ?', [questionId], (err, question) => {
+      if (err) {
+        console.error('Error getting question for timeout:', err);
+        return;
+      }
+      
+      // Reveal correct answer to all students in the session
+      io.to(sessionId).emit('quiz-results', { 
+        questionId, 
+        correctAnswer: question.correct_answer 
+      });
+      
+      console.log('📊 Quiz results revealed for question:', questionId);
+    });
+  });
+
   // Lecturer stops recording
   socket.on('stop-recording', (sessionId) => {
     console.log('🛑 Stopping recording for session:', sessionId);
