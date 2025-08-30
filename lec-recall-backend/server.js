@@ -246,9 +246,13 @@ const getAnalytics = async (req, res) => {
   try {
     const { sessionId } = req.params;
     
-    // Get basic session analytics
+    // Get comprehensive session analytics
     const analyticsQuery = `
       SELECT 
+        s.session_name,
+        s.lecturer_name,
+        s.created_at,
+        s.ended_at,
         COUNT(DISTINCT q.id) as total_questions,
         COUNT(DISTINCT st.id) as total_students,
         COUNT(DISTINCT sa.id) as total_answers,
@@ -259,15 +263,138 @@ const getAnalytics = async (req, res) => {
       LEFT JOIN students st ON s.id = st.session_id
       LEFT JOIN student_answers sa ON q.id = sa.question_id
       WHERE s.id = ?
+      GROUP BY s.id
     `;
     
     db.get(analyticsQuery, [sessionId], (err, analytics) => {
       if (err) {
         console.error('Error getting analytics:', err);
-        res.status(500).json({ error: 'Database error' });
-      } else {
-        res.json(analytics);
+        return res.status(500).json({ error: 'Database error' });
       }
+      
+      if (!analytics) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      
+      // Get detailed question analytics
+      const questionAnalyticsQuery = `
+        SELECT 
+          q.id as question_id,
+          q.formatted_question as question,
+          q.correct_answer,
+          COUNT(sa.id) as total_answers,
+          COUNT(CASE WHEN sa.selected_answer = q.correct_answer THEN 1 END) as correct_answers,
+          ROUND(CAST(COUNT(CASE WHEN sa.selected_answer = q.correct_answer THEN 1 END) AS FLOAT) / 
+                COUNT(sa.id) * 100, 2) as accuracy_rate,
+          COUNT(CASE WHEN sa.selected_answer = 'A' THEN 1 END) as option_a_count,
+          COUNT(CASE WHEN sa.selected_answer = 'B' THEN 1 END) as option_b_count,
+          COUNT(CASE WHEN sa.selected_answer = 'C' THEN 1 END) as option_c_count,
+          COUNT(CASE WHEN sa.selected_answer = 'D' THEN 1 END) as option_d_count
+        FROM questions q
+        LEFT JOIN student_answers sa ON q.id = sa.question_id
+        WHERE q.session_id = ?
+        GROUP BY q.id
+        ORDER BY q.created_at ASC
+      `;
+      
+      db.all(questionAnalyticsQuery, [sessionId], (err, questionAnalytics) => {
+        if (err) {
+          console.error('Error getting question analytics:', err);
+          return res.status(500).json({ error: 'Database error' });
+        }
+        
+        // Get student participation details
+        const studentParticipationQuery = `
+          SELECT 
+            st.id as student_id,
+            st.name as student_name,
+            COUNT(sa.id) as questions_answered,
+            COUNT(CASE WHEN sa.selected_answer = q.correct_answer THEN 1 END) as correct_answers,
+            ROUND(CAST(COUNT(CASE WHEN sa.selected_answer = q.correct_answer THEN 1 END) AS FLOAT) / 
+                  COUNT(sa.id) * 100, 2) as accuracy_rate
+          FROM students st
+          LEFT JOIN student_answers sa ON st.id = sa.student_id
+          LEFT JOIN questions q ON sa.question_id = q.id
+          WHERE st.session_id = ?
+          GROUP BY st.id
+          ORDER BY st.name
+        `;
+        
+        db.all(studentParticipationQuery, [sessionId], (err, studentParticipation) => {
+          if (err) {
+            console.error('Error getting student participation:', err);
+            return res.status(500).json({ error: 'Database error' });
+          }
+          
+          // Calculate most missed questions and recommended review
+          const mostMissedQuestions = questionAnalytics
+            .filter(q => q.total_answers > 0)
+            .sort((a, b) => (100 - a.accuracy_rate) - (100 - b.accuracy_rate))
+            .slice(0, 3)
+            .map(q => ({
+              question: q.question,
+              accuracyRate: q.accuracy_rate,
+              correctAnswer: q.correct_answer,
+              totalAnswers: q.total_answers,
+              correctAnswers: q.correct_answers
+            }));
+          
+          // Calculate overall session statistics
+          const totalPossibleAnswers = analytics.total_questions * analytics.total_students;
+          const overallAccuracy = totalPossibleAnswers > 0 
+            ? Math.round((analytics.total_answers / totalPossibleAnswers) * 100) 
+            : 0;
+          
+          // Prepare response
+          const response = {
+            sessionInfo: {
+              sessionName: analytics.session_name,
+              lecturerName: analytics.lecturer_name,
+              createdAt: analytics.created_at,
+              endedAt: analytics.ended_at,
+              duration: analytics.ended_at ? 
+                Math.round((new Date(analytics.ended_at) - new Date(analytics.created_at)) / 1000 / 60) : null
+            },
+            summary: {
+              totalQuestions: analytics.total_questions,
+              totalStudents: analytics.total_students,
+              totalAnswers: analytics.total_answers,
+              participationRate: analytics.participation_rate,
+              overallAccuracy: overallAccuracy
+            },
+            questionAnalytics: questionAnalytics.map(q => ({
+              questionId: q.question_id,
+              question: q.question,
+              correctAnswer: q.correct_answer,
+              totalAnswers: q.total_answers,
+              correctAnswers: q.correct_answers,
+              accuracyRate: q.accuracy_rate,
+              answerDistribution: {
+                A: q.option_a_count,
+                B: q.option_b_count,
+                C: q.option_c_count,
+                D: q.option_d_count
+              }
+            })),
+            studentParticipation: studentParticipation.map(s => ({
+              studentId: s.student_id,
+              studentName: s.student_name,
+              questionsAnswered: s.questions_answered,
+              correctAnswers: s.correct_answers,
+              accuracyRate: s.accuracy_rate
+            })),
+            recommendedReview: {
+              mostMissedQuestions: mostMissedQuestions,
+              topicsToReview: mostMissedQuestions.map(q => q.question),
+              overallRecommendation: mostMissedQuestions.length > 0 
+                ? `Focus on reviewing concepts related to: ${mostMissedQuestions.map(q => q.question.substring(0, 50) + '...').join(', ')}`
+                : 'All students performed well on the questions!'
+            }
+          };
+          
+          res.json(response);
+        });
+      });
     });
   } catch (error) {
     console.error('Error in getAnalytics:', error);
@@ -318,6 +445,176 @@ const getSessionQuestions = async (req, res) => {
   }
 };
 
+// Get all sessions for a lecturer
+const getAllSessions = async (req, res) => {
+  try {
+    const { lecturerId } = req.params;
+    
+    const query = `
+      SELECT 
+        id as sessionId,
+        session_name as sessionName,
+        lecturer_name as lecturerName,
+        join_code as joinCode,
+        status,
+        created_at as createdAt,
+        ended_at as endedAt,
+        time_limit as timeLimit
+      FROM sessions 
+      WHERE lecturer_name = ? 
+      ORDER BY created_at DESC
+    `;
+    
+    db.all(query, [lecturerId], (err, sessions) => {
+      if (err) {
+        console.error('Error getting sessions:', err);
+        res.status(500).json({ error: 'Database error' });
+      } else {
+        res.json({ sessions });
+      }
+    });
+  } catch (error) {
+    console.error('Error in getAllSessions:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// Get detailed session data
+const getSessionDetails = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    const query = `
+      SELECT 
+        s.*,
+        COUNT(DISTINCT q.id) as question_count,
+        COUNT(DISTINCT st.id) as student_count,
+        COUNT(DISTINCT sa.id) as answer_count
+      FROM sessions s
+      LEFT JOIN questions q ON s.id = q.session_id
+      LEFT JOIN students st ON s.id = st.session_id
+      LEFT JOIN student_answers sa ON q.id = sa.question_id
+      WHERE s.id = ?
+      GROUP BY s.id
+    `;
+    
+    db.get(query, [sessionId], (err, session) => {
+      if (err) {
+        console.error('Error getting session details:', err);
+        res.status(500).json({ error: 'Database error' });
+      } else if (!session) {
+        res.status(404).json({ error: 'Session not found' });
+      } else {
+        res.json(session);
+      }
+    });
+  } catch (error) {
+    console.error('Error in getSessionDetails:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// Get student's session history
+const getStudentSessions = async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    
+    const query = `
+      SELECT 
+        s.id as sessionId,
+        s.session_name as sessionName,
+        s.lecturer_name as lecturerName,
+        s.created_at as sessionCreatedAt,
+        s.ended_at as sessionEndedAt,
+        st.joined_at as joinedAt,
+        COUNT(DISTINCT q.id) as total_questions,
+        COUNT(sa.id) as questions_answered,
+        COUNT(CASE WHEN sa.selected_answer = q.correct_answer THEN 1 END) as correct_answers,
+        ROUND(CAST(COUNT(CASE WHEN sa.selected_answer = q.correct_answer THEN 1 END) AS FLOAT) / 
+              COUNT(sa.id) * 100, 2) as accuracy_rate
+      FROM students st
+      JOIN sessions s ON st.session_id = s.id
+      LEFT JOIN questions q ON s.id = q.session_id
+      LEFT JOIN student_answers sa ON st.id = sa.student_id AND q.id = sa.question_id
+      WHERE st.name = ?
+      GROUP BY s.id
+      ORDER BY s.created_at DESC
+    `;
+    
+    db.all(query, [studentId], (err, sessions) => {
+      if (err) {
+        console.error('Error getting student sessions:', err);
+        res.status(500).json({ error: 'Database error' });
+      } else {
+        res.json({ sessions });
+      }
+    });
+  } catch (error) {
+    console.error('Error in getStudentSessions:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// Get student-specific analytics for a session
+const getStudentAnalytics = async (req, res) => {
+  try {
+    const { sessionId, studentId } = req.params;
+    
+    const query = `
+      SELECT 
+        st.name as studentName,
+        COUNT(DISTINCT q.id) as total_questions,
+        COUNT(sa.id) as questions_answered,
+        COUNT(CASE WHEN sa.selected_answer = q.correct_answer THEN 1 END) as correct_answers,
+        ROUND(CAST(COUNT(CASE WHEN sa.selected_answer = q.correct_answer THEN 1 END) AS FLOAT) / 
+              COUNT(sa.id) * 100, 2) as accuracy_rate,
+        q.formatted_question as question,
+        q.correct_answer as correctAnswer,
+        sa.selected_answer as selectedAnswer,
+        sa.answered_at as answeredAt
+      FROM students st
+      LEFT JOIN student_answers sa ON st.id = sa.student_id
+      LEFT JOIN questions q ON sa.question_id = q.id
+      WHERE st.session_id = ? AND st.name = ?
+      GROUP BY st.id, q.id
+      ORDER BY q.created_at ASC
+    `;
+    
+    db.all(query, [sessionId, studentId], (err, results) => {
+      if (err) {
+        console.error('Error getting student analytics:', err);
+        res.status(500).json({ error: 'Database error' });
+      } else {
+        // Process results to separate summary and detailed answers
+        const summary = results.length > 0 ? {
+          studentName: results[0].studentName,
+          totalQuestions: results[0].total_questions,
+          questionsAnswered: results[0].questions_answered,
+          correctAnswers: results[0].correct_answers,
+          accuracyRate: results[0].accuracy_rate
+        } : null;
+        
+        const detailedAnswers = results.map(r => ({
+          question: r.question,
+          correctAnswer: r.correctAnswer,
+          selectedAnswer: r.selectedAnswer,
+          isCorrect: r.selectedAnswer === r.correctAnswer,
+          answeredAt: r.answeredAt
+        }));
+        
+        res.json({
+          summary,
+          detailedAnswers,
+          missedQuestions: detailedAnswers.filter(a => !a.isCorrect)
+        });
+      }
+    });
+  } catch (error) {
+    console.error('Error in getStudentAnalytics:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 // API Routes
 app.post('/api/sessions/create', createSession);
 app.post('/api/sessions/join', joinSession);
@@ -327,6 +624,10 @@ app.post('/api/questions/detect', detectQuestionHandler);
 app.post('/api/questions/generate-quiz', generateQuizHandler);
 app.post('/api/answers/submit', submitAnswer);
 app.get('/api/analytics/:sessionId', getAnalytics);
+app.get('/api/lecturer/:lecturerId/sessions', getAllSessions);
+app.get('/api/sessions/:sessionId/details', getSessionDetails);
+app.get('/api/student/:studentId/sessions', getStudentSessions);
+app.get('/api/analytics/:sessionId/student/:studentId', getStudentAnalytics);
 
 // Generate lecture summary
 app.post('/api/sessions/:sessionId/summary', async (req, res) => {
