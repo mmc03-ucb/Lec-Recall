@@ -8,6 +8,9 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
+// Global quiz timer tracking
+const activeQuizTimers = new Map(); // sessionId -> { questionId, startTime, timeLimit }
+
 // Import Gemini service
 const { detectQuestion, generateQuiz, generateSummary, generateStudentReview } = require('./services/geminiService');
 
@@ -272,10 +275,54 @@ const getAnalytics = async (req, res) => {
   }
 };
 
+// Get all questions for a session (for late-joining students)
+const getSessionQuestions = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    const query = `
+      SELECT id as questionId, formatted_question as question, 
+             option_a, option_b, option_c, option_d, correct_answer as correctAnswer,
+             created_at
+      FROM questions 
+      WHERE session_id = ? 
+      ORDER BY created_at ASC
+    `;
+    
+    db.all(query, [sessionId], (err, questions) => {
+      if (err) {
+        console.error('Error getting session questions:', err);
+        res.status(500).json({ error: 'Failed to get questions' });
+      } else {
+        // Format questions for frontend
+        const formattedQuestions = questions.map(q => ({
+          questionId: q.questionId,
+          question: q.question,
+          options: {
+            A: q.option_a,
+            B: q.option_b,
+            C: q.option_c,
+            D: q.option_d
+          },
+          correctAnswer: q.correctAnswer,
+          answered: false,
+          selectedAnswer: null
+        }));
+        
+        res.json({ questions: formattedQuestions });
+      }
+    });
+  } catch (error) {
+    console.error('Error in getSessionQuestions:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 // API Routes
 app.post('/api/sessions/create', createSession);
 app.post('/api/sessions/join', joinSession);
 app.get('/api/sessions/:sessionId', getSession);
+app.get('/api/sessions/:sessionId/questions', getSessionQuestions);
 app.post('/api/questions/detect', detectQuestionHandler);
 app.post('/api/questions/generate-quiz', generateQuizHandler);
 app.post('/api/answers/submit', submitAnswer);
@@ -361,9 +408,59 @@ io.on('connection', (socket) => {
           socket.emit('join-error', { error: 'Failed to join session' });
         } else {
           socket.join(session.id);
-          socket.emit('session-joined', { studentId, sessionId: session.id });
-          socket.to(session.id).emit('student-joined', { studentName });
-          console.log('✅ Student joined:', { studentName, sessionId: session.id });
+          
+          // Get all previous questions for this session
+          const questionsQuery = `
+            SELECT id as questionId, formatted_question as question, 
+                   option_a, option_b, option_c, option_d, correct_answer as correctAnswer,
+                   created_at
+            FROM questions 
+            WHERE session_id = ? 
+            ORDER BY created_at ASC
+          `;
+          
+          db.all(questionsQuery, [session.id], (err, questions) => {
+            const formattedQuestions = questions.map(q => ({
+              questionId: q.questionId,
+              question: q.question,
+              options: {
+                A: q.option_a,
+                B: q.option_b,
+                C: q.option_c,
+                D: q.option_d
+              },
+              correctAnswer: q.correctAnswer,
+              answered: false,
+              selectedAnswer: null
+            }));
+            
+            // Get current active timer info
+            const activeTimer = activeQuizTimers.get(session.id);
+            let currentTimerInfo = null;
+            if (activeTimer) {
+              const elapsed = Date.now() - activeTimer.startTime;
+              const remaining = Math.max(0, activeTimer.timeLimit - elapsed);
+              currentTimerInfo = {
+                questionId: activeTimer.questionId,
+                timeRemaining: Math.ceil(remaining / 1000),
+                startTime: activeTimer.startTime
+              };
+            }
+            
+            socket.emit('session-joined', { 
+              studentId, 
+              sessionId: session.id,
+              previousQuestions: formattedQuestions,
+              currentTimer: currentTimerInfo
+            });
+            
+            socket.to(session.id).emit('student-joined', { studentName });
+            console.log('✅ Student joined:', { 
+              studentName, 
+              sessionId: session.id, 
+              previousQuestions: formattedQuestions.length 
+            });
+          });
         }
       });
     });
@@ -423,6 +520,14 @@ io.on('connection', (socket) => {
               // Get session time limit
               db.get('SELECT time_limit FROM sessions WHERE id = ?', [sessionId], (err, session) => {
                 const timeLimit = session ? session.time_limit : 10;
+                const startTime = Date.now();
+                
+                // Track this quiz timer globally
+                activeQuizTimers.set(sessionId, {
+                  questionId,
+                  startTime,
+                  timeLimit: timeLimit * 1000 // Convert to milliseconds
+                });
                 
                 // Emit quiz to all students in the session
                 io.to(sessionId).emit('new-quiz', {
@@ -435,14 +540,29 @@ io.on('connection', (socket) => {
                     D: quiz.optionD
                   },
                   correctAnswer: quiz.correctAnswer,
-                  timeLimit: timeLimit
+                  timeLimit: timeLimit,
+                  startTime: startTime
                 });
+                
+                // Set timer to auto-reveal results
+                setTimeout(() => {
+                  // Check if this timer is still active (not replaced by newer question)
+                  const currentTimer = activeQuizTimers.get(sessionId);
+                  if (currentTimer && currentTimer.questionId === questionId) {
+                    io.to(sessionId).emit('quiz-timeout', { 
+                      questionId, 
+                      correctAnswer: quiz.correctAnswer 
+                    });
+                    console.log('⏰ Quiz auto-timeout for question:', questionId);
+                  }
+                }, timeLimit * 1000);
                 
                 console.log('📤 Quiz sent to students:', {
                   questionId,
                   question: questionResult.question,
                   correctAnswer: quiz.correctAnswer,
-                  timeLimit: timeLimit
+                  timeLimit: timeLimit,
+                  startTime: startTime
                 });
               });
             }

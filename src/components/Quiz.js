@@ -3,7 +3,7 @@ import './Quiz.css';
 
 const Quiz = ({ quiz, onSubmitAnswer, studentId, isReadOnly = false }) => {
   const [selectedAnswer, setSelectedAnswer] = useState(quiz.selectedAnswer || '');
-  const [timeLeft, setTimeLeft] = useState(quiz.timeLimit || 10); // 10 seconds default
+  const [timeLeft, setTimeLeft] = useState(0);
   const [submitted, setSubmitted] = useState(quiz.answered || false);
   const [showResults, setShowResults] = useState(false);
   const [correctAnswer, setCorrectAnswer] = useState(null);
@@ -13,22 +13,42 @@ const Quiz = ({ quiz, onSubmitAnswer, studentId, isReadOnly = false }) => {
     // Reset state when quiz changes
     setSelectedAnswer(quiz.selectedAnswer || '');
     setSubmitted(quiz.answered || false);
-    setTimeLeft(quiz.timeLimit || 10);
     setIsCorrect(quiz.selectedAnswer === quiz.correctAnswer);
+    
+    // Calculate time left based on server start time (universal timer)
+    if (quiz.startTime && quiz.timeLimit && !quiz.timedOut && !quiz.answered) {
+      const elapsed = Math.floor((Date.now() - quiz.startTime) / 1000);
+      const remaining = Math.max(0, quiz.timeLimit - elapsed);
+      setTimeLeft(remaining);
+    } else {
+      setTimeLeft(0);
+    }
   }, [quiz]);
 
   useEffect(() => {
-    // Don't run timer for read-only or already answered quizzes
-    if (isReadOnly || submitted || timeLeft <= 0) {
+    // Don't run timer for read-only, answered, or timed-out quizzes
+    if (isReadOnly || submitted || quiz.timedOut || quiz.answered) {
+      return;
+    }
+
+    // Only run timer if we have a start time (active quiz)
+    if (!quiz.startTime || !quiz.timeLimit) {
       return;
     }
 
     const timer = setInterval(() => {
-      setTimeLeft(prev => prev - 1);
+      const elapsed = Math.floor((Date.now() - quiz.startTime) / 1000);
+      const remaining = Math.max(0, quiz.timeLimit - elapsed);
+      setTimeLeft(remaining);
+      
+      // Auto-stop timer when it reaches 0
+      if (remaining <= 0) {
+        setTimeLeft(0);
+      }
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [timeLeft, isReadOnly, submitted]);
+  }, [quiz.startTime, quiz.timeLimit, isReadOnly, submitted, quiz.timedOut, quiz.answered]);
 
   const handleSubmit = () => {
     if (selectedAnswer && !submitted) {
@@ -104,7 +124,7 @@ const Quiz = ({ quiz, onSubmitAnswer, studentId, isReadOnly = false }) => {
               value={option}
               checked={selectedAnswer === option}
               onChange={(e) => setSelectedAnswer(e.target.value)}
-              disabled={submitted || timeLeft === 0 || isReadOnly}
+              disabled={submitted || timeLeft === 0 || quiz.timedOut || isReadOnly}
             />
             <span className="option-letter">{option}.</span>
             <span className="option-text">{quiz.options[option]}</span>
@@ -113,7 +133,7 @@ const Quiz = ({ quiz, onSubmitAnswer, studentId, isReadOnly = false }) => {
       </div>
       
       <div className="quiz-actions">
-        {!submitted && timeLeft > 0 && !isReadOnly && (
+        {!submitted && timeLeft > 0 && !quiz.timedOut && !isReadOnly && (
           <button 
             onClick={handleSubmit} 
             disabled={!selectedAnswer}
@@ -134,7 +154,7 @@ const Quiz = ({ quiz, onSubmitAnswer, studentId, isReadOnly = false }) => {
           </div>
         )}
         
-        {timeLeft === 0 && !submitted && (
+        {(timeLeft === 0 || quiz.timedOut) && !submitted && (
           <div className="timeout-message">
             <p>Time's up! The correct answer was {quiz.correctAnswer}.</p>
           </div>

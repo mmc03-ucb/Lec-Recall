@@ -250,19 +250,54 @@ function App() {
     setStudentId(data.studentId);
     setUserType('student');
     
+    // Load previous questions if any (for late-joining students)
+    if (data.previousQuestions && data.previousQuestions.length > 0) {
+      console.log('📚 Loading previous questions:', data.previousQuestions.length);
+      setAllQuizzes(data.previousQuestions);
+      
+      // If there's a current active timer, find and set that question as current
+      if (data.currentTimer) {
+        const activeQuestionIndex = data.previousQuestions.findIndex(
+          q => q.questionId === data.currentTimer.questionId
+        );
+        if (activeQuestionIndex !== -1) {
+          setCurrentQuizIndex(activeQuestionIndex);
+          setCurrentQuiz({
+            ...data.previousQuestions[activeQuestionIndex],
+            timeLeft: data.currentTimer.timeRemaining,
+            startTime: data.currentTimer.startTime
+          });
+        }
+      } else {
+        // No active timer, show the latest question
+        setCurrentQuizIndex(data.previousQuestions.length - 1);
+        setCurrentQuiz(data.previousQuestions[data.previousQuestions.length - 1]);
+      }
+    }
+    
     // Set up socket listeners for student
     newSocket.on('new-quiz', (quizData) => {
       console.log('🎯 New quiz received:', quizData);
       
       // Add to all quizzes array
       setAllQuizzes(prev => {
-        const newQuizzes = [...prev, { ...quizData, answered: false, selectedAnswer: null }];
+        const newQuizzes = [...prev, { 
+          ...quizData, 
+          answered: false, 
+          selectedAnswer: null,
+          startTime: quizData.startTime
+        }];
         setCurrentQuizIndex(newQuizzes.length - 1); // Show latest quiz
         return newQuizzes;
       });
       
-      // Set as current quiz
-      setCurrentQuiz({ ...quizData, answered: false, selectedAnswer: null });
+      // Set as current quiz with server start time
+      setCurrentQuiz({ 
+        ...quizData, 
+        answered: false, 
+        selectedAnswer: null,
+        startTime: quizData.startTime
+      });
     });
     
     newSocket.on('transcript-received', (data) => {
@@ -273,6 +308,20 @@ function App() {
     newSocket.on('quiz-results', (results) => {
       console.log('Quiz results:', results);
       // Handle quiz results
+    });
+    
+    newSocket.on('quiz-timeout', (data) => {
+      console.log('⏰ Quiz timeout received:', data);
+      // Mark the timed-out quiz as completed
+      setAllQuizzes(prev => prev.map(quiz => 
+        quiz.questionId === data.questionId 
+          ? { ...quiz, timedOut: true, correctAnswer: data.correctAnswer }
+          : quiz
+      ));
+      
+      if (currentQuiz && currentQuiz.questionId === data.questionId) {
+        setCurrentQuiz(prev => ({ ...prev, timedOut: true, correctAnswer: data.correctAnswer }));
+      }
     });
     
     newSocket.on('recording-started', () => {
