@@ -73,6 +73,12 @@
   color: white;
 }
 
+.status-indicator.recording {
+  background: #f56565;
+  color: white;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
 .start-section {
   margin: 2rem 0;
 }

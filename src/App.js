@@ -157,18 +157,31 @@ function App() {
   };
 
   const stopTranscription = () => {
+    // Stop MediaRecorder
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
     }
     
+    // Close Deepgram connection
     if (connectionRef.current) {
       connectionRef.current.finish();
       connectionRef.current = null;
     }
     
+    // Stop microphone stream
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => {
+        track.stop();
+        console.log('🎤 Microphone track stopped:', track.kind);
+      });
+      streamRef.current = null;
+    }
+    
     setIsTranscribing(false);
     isTranscribingRef.current = false;
     setTranscription(''); // Clear any remaining interim transcript
+    console.log('🛑 All recording stopped - microphone disabled');
   };
 
   const handleStart = async () => {
@@ -184,9 +197,6 @@ function App() {
   useEffect(() => {
     return () => {
       stopTranscription();
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
     };
   }, []);
 
@@ -197,8 +207,8 @@ function App() {
         <p className="subtitle">Your learning companion</p>
         
         <div className="status-section">
-          <div className={`status-indicator ${micPermission === 'granted' ? 'connected' : micPermission === 'denied' ? 'disconnected' : 'unknown'}`}>
-            Mic: {micPermission === 'granted' ? 'Ready' : micPermission === 'denied' ? 'Denied' : 'Unknown'}
+          <div className={`status-indicator ${isTranscribing ? 'recording' : micPermission === 'granted' ? 'connected' : micPermission === 'denied' ? 'disconnected' : 'unknown'}`}>
+            Mic: {isTranscribing ? 'Recording' : micPermission === 'granted' ? 'Ready' : micPermission === 'denied' ? 'Denied' : 'Unknown'}
           </div>
         </div>
         
