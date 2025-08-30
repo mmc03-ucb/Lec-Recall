@@ -1,21 +1,43 @@
 import { useState, useEffect, useRef } from 'react';
 import { createClient, LiveTranscriptionEvents } from '@deepgram/sdk';
+import io from 'socket.io-client';
+import SessionCreator from './components/SessionCreator';
+import StudentJoin from './components/StudentJoin';
+import Quiz from './components/Quiz';
 import './App.css';
 
 function App() {
+  // Transcription state
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcription, setTranscription] = useState('');
   const [finalTranscription, setFinalTranscription] = useState('');
   const [error, setError] = useState('');
   const [micPermission, setMicPermission] = useState('unknown');
   
+  // Session state
+  const [userType, setUserType] = useState(''); // 'lecturer' or 'student'
+  const [sessionData, setSessionData] = useState(null);
+  const [socket, setSocket] = useState(null);
+  const [currentQuiz, setCurrentQuiz] = useState(null);
+  const [studentId, setStudentId] = useState(null);
+  const [isProcessingTranscript, setIsProcessingTranscript] = useState(false);
+  const [questionDetected, setQuestionDetected] = useState(false);
+  
+  // Refs
   const connectionRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const streamRef = useRef(null);
   const isTranscribingRef = useRef(false);
 
-  // Your Deepgram API key
-  const DEEPGRAM_API_KEY = process.env.REACT_APP_DEEPGRAM_API_KEY;
+  // Your Deepgram API key (temporary direct assignment)
+  const DEEPGRAM_API_KEY = '3cc6642a0267111230739ecf52ecc7e1de427d3b';
+  
+  // Debug environment variable loading
+  useEffect(() => {
+    console.log('🔑 API Key Status: Loaded directly ✅');
+    console.log('- DEEPGRAM_API_KEY: Available');
+    console.log('- Backend URL: http://localhost:5001');
+  }, []);
 
   const startMediaRecorder = (stream, connection) => {
     // Set up MediaRecorder with fallback MIME types
@@ -87,6 +109,8 @@ function App() {
       return;
     }
 
+    // API key is now directly available
+
     try {
       // Get microphone stream
       const stream = streamRef.current || await requestMicrophonePermission();
@@ -132,6 +156,18 @@ function App() {
             // Final transcript - add to final transcription
             setFinalTranscription(prev => prev + ' ' + transcript);
             setTranscription(''); // Clear interim transcript
+            
+            // Send transcript chunk to backend for question detection
+            if (socket && sessionData) {
+              console.log('📤 Sending transcript chunk to backend:', transcript);
+              setIsProcessingTranscript(true);
+              socket.emit('transcript-chunk', {
+                sessionId: sessionData.sessionId,
+                text: transcript
+              });
+            } else {
+              console.log('⚠️ Cannot send transcript: socket or sessionData not available');
+            }
           } else {
             // Interim transcript - show as live feedback
             setTranscription(transcript);
@@ -184,13 +220,89 @@ function App() {
     console.log('🛑 All recording stopped - microphone disabled');
   };
 
+  // Session management functions
+  const handleSessionCreated = (data, newSocket) => {
+    setSessionData(data);
+    setSocket(newSocket);
+    setUserType('lecturer');
+    
+    // Set up socket listeners for lecturer
+    newSocket.on('student-joined', (data) => {
+      console.log('Student joined:', data.studentName);
+    });
+    
+    newSocket.on('question-detected', (data) => {
+      console.log('❓ Question detected:', data.question);
+      setQuestionDetected(true);
+      setTimeout(() => setQuestionDetected(false), 3000); // Show for 3 seconds
+    });
+    
+    newSocket.on('recording-stopped', () => {
+      console.log('Recording stopped');
+    });
+  };
+
+  const handleSessionJoined = (data, newSocket) => {
+    setSessionData(data);
+    setSocket(newSocket);
+    setStudentId(data.studentId);
+    setUserType('student');
+    
+    // Set up socket listeners for student
+    newSocket.on('new-quiz', (quizData) => {
+      console.log('🎯 New quiz received:', quizData);
+      setCurrentQuiz(quizData);
+    });
+    
+    newSocket.on('transcript-received', (data) => {
+      console.log('📝 Transcript chunk processed:', data);
+      setIsProcessingTranscript(false);
+    });
+    
+    newSocket.on('quiz-results', (results) => {
+      console.log('Quiz results:', results);
+      // Handle quiz results
+    });
+    
+    newSocket.on('recording-started', () => {
+      console.log('Recording started');
+    });
+    
+    newSocket.on('recording-stopped', () => {
+      console.log('Recording stopped');
+    });
+  };
+
+  const handleSubmitAnswer = (questionId, studentId, answer) => {
+    if (socket) {
+      socket.emit('submit-answer', { questionId, studentId, answer });
+    }
+  };
+
+  const handleStartRecording = () => {
+    if (socket && sessionData) {
+      socket.emit('start-recording', sessionData.sessionId);
+      startTranscription();
+    }
+  };
+
+  const handleStopRecording = () => {
+    if (socket && sessionData) {
+      socket.emit('stop-recording', sessionData.sessionId);
+      stopTranscription();
+    }
+  };
+
   const handleStart = async () => {
-    setError('');
-    await startTranscription();
+    if (isTranscribing) {
+      handleStopRecording();
+    } else {
+      handleStartRecording();
+    }
   };
 
   const handleStop = () => {
-    stopTranscription();
+    handleStopRecording();
   };
 
   // Cleanup on unmount
@@ -206,72 +318,164 @@ function App() {
         <h1 className="title">Welcome to Lec-Recall</h1>
         <p className="subtitle">Your learning companion</p>
         
-        <div className="status-section">
-          <div className={`status-indicator ${isTranscribing ? 'recording' : micPermission === 'granted' ? 'connected' : micPermission === 'denied' ? 'disconnected' : 'unknown'}`}>
-            Mic: {isTranscribing ? 'Recording' : micPermission === 'granted' ? 'Ready' : micPermission === 'denied' ? 'Denied' : 'Unknown'}
-          </div>
-        </div>
-        
-        <div className="start-section">
-          {!isTranscribing ? (
-            <button 
-              className="start-button"
-              onClick={handleStart}
-              disabled={micPermission === 'denied'}
-            >
-              Start Recording
-            </button>
-          ) : (
-            <button 
-              className="stop-button"
-              onClick={handleStop}
-            >
-              Stop Recording
-            </button>
-          )}
-        </div>
-        
-        {error && (
-          <div className="error-section">
-            <p className="error-text">{error}</p>
+        {/* User Type Selection */}
+        {!userType && !sessionData && (
+          <div className="user-selection">
+            <h2>Choose your role:</h2>
+            <div className="role-buttons">
+              <button 
+                className="role-button lecturer"
+                onClick={() => setUserType('lecturer')}
+              >
+                I'm a Lecturer
+              </button>
+              <button 
+                className="role-button student"
+                onClick={() => setUserType('student')}
+              >
+                I'm a Student
+              </button>
+            </div>
           </div>
         )}
         
-        {(isTranscribing || finalTranscription) && (
-          <div className="transcription-section">
-            <h3 className="transcription-title">Transcription:</h3>
-            <div className="transcription-content">
-              <div className="final-transcript">
-                {finalTranscription}
+        {/* Session Creator for Lecturers */}
+        {userType === 'lecturer' && !sessionData && (
+          <SessionCreator onSessionCreated={handleSessionCreated} />
+        )}
+        
+        {/* Student Join for Students */}
+        {userType === 'student' && !sessionData && (
+          <StudentJoin onSessionJoined={handleSessionJoined} />
+        )}
+        
+        {/* Session Active - Lecturer View */}
+        {userType === 'lecturer' && sessionData && (
+          <div className="lecturer-view">
+            <div className="session-info">
+              <h3>Session Active</h3>
+              <p>Join Code: <strong>{sessionData.joinCode}</strong></p>
+              <p>Session ID: {sessionData.sessionId}</p>
+            </div>
+            
+            <div className="status-section">
+              <div className={`status-indicator ${isTranscribing ? 'recording' : micPermission === 'granted' ? 'connected' : micPermission === 'denied' ? 'disconnected' : 'unknown'}`}>
+                Mic: {isTranscribing ? 'Recording' : micPermission === 'granted' ? 'Ready' : micPermission === 'denied' ? 'Denied' : 'Unknown'}
               </div>
-              {isTranscribing && transcription && (
-                <div className="interim-transcript">
-                  {transcription}
-                </div>
-              )}
-              {isTranscribing && !transcription && !finalTranscription && (
-                <div className="listening-indicator">
-                  Listening... Speak into your microphone
-                </div>
+            </div>
+            
+            <div className="start-section">
+              {!isTranscribing ? (
+                <button 
+                  className="start-button"
+                  onClick={handleStart}
+                  disabled={micPermission === 'denied'}
+                >
+                  Start Recording
+                </button>
+              ) : (
+                <button 
+                  className="stop-button"
+                  onClick={handleStop}
+                >
+                  Stop Recording
+                </button>
               )}
             </div>
-            {isTranscribing && (
-              <div className="audio-indicator">
-                <div className="audio-dot"></div>
-                <span>Recording Active</span>
+            
+            {error && (
+              <div className="error-section">
+                <p className="error-text">{error}</p>
+              </div>
+            )}
+            
+            {(isTranscribing || finalTranscription) && (
+              <div className="transcription-section">
+                <h3 className="transcription-title">Transcription:</h3>
+                <div className="transcription-content">
+                  <div className="final-transcript">
+                    {finalTranscription}
+                  </div>
+                  {isTranscribing && transcription && (
+                    <div className="interim-transcript">
+                      {transcription}
+                    </div>
+                  )}
+                  {isTranscribing && !transcription && !finalTranscription && (
+                    <div className="listening-indicator">
+                      Listening... Speak into your microphone
+                    </div>
+                  )}
+                </div>
+                {isTranscribing && (
+                  <div className="audio-indicator">
+                    <div className="audio-dot"></div>
+                    <span>Recording Active</span>
+                  </div>
+                )}
+                {isProcessingTranscript && (
+                  <div className="processing-indicator">
+                    <div className="processing-dot"></div>
+                    <span>Processing transcript for questions...</span>
+                  </div>
+                )}
+                {questionDetected && (
+                  <div className="question-detected-indicator">
+                    <div className="question-dot"></div>
+                    <span>Question detected! Generating quiz...</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
         )}
         
-        <div className="info-section">
-          <p className="info-text">
-            {isTranscribing 
-              ? 'Recording in progress. Click stop to finish and see the complete transcription.' 
-              : 'Click start to begin recording and see live transcription'
-            }
-          </p>
-        </div>
+        {/* Session Active - Student View */}
+        {userType === 'student' && sessionData && (
+          <div className="student-view">
+            <div className="session-info">
+              <h3>Connected to Session</h3>
+              <p>Session ID: {sessionData.sessionId}</p>
+              <p>Student ID: {studentId}</p>
+            </div>
+            
+            {currentQuiz && (
+              <Quiz 
+                quiz={currentQuiz}
+                onSubmitAnswer={handleSubmitAnswer}
+                studentId={studentId}
+              />
+            )}
+            
+            {!currentQuiz && (
+              <div className="waiting-message">
+                <p>Waiting for quizzes to appear...</p>
+                <p>The lecturer will start recording and questions will appear automatically.</p>
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Reset Button */}
+        {sessionData && (
+          <div className="reset-section">
+            <button 
+              className="reset-button"
+              onClick={() => {
+                if (socket) socket.disconnect();
+                setSessionData(null);
+                setUserType('');
+                setSocket(null);
+                setCurrentQuiz(null);
+                setStudentId(null);
+                setFinalTranscription('');
+                setTranscription('');
+              }}
+            >
+              Start Over
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -391,6 +391,12 @@ io.on('connection', (socket) => {
       if (questionResult.hasQuestion && questionResult.question) {
         console.log('❓ Question detected:', questionResult.question);
         
+        // Emit question detected event to lecturer
+        socket.emit('question-detected', { 
+          question: questionResult.question,
+          originalText: text 
+        });
+        
         // Generate quiz for the detected question
         const quiz = await generateQuiz(questionResult.question);
         
@@ -423,7 +429,7 @@ io.on('connection', (socket) => {
                   D: quiz.optionD
                 },
                 correctAnswer: quiz.correctAnswer,
-                timeLimit: 300 // 5 minutes
+                timeLimit: 10 // 5 minutes
               });
               
               console.log('📤 Quiz sent to students:', {
