@@ -67,23 +67,24 @@ const initializeDatabase = () => {
 // API Route Handlers
 const createSession = async (req, res) => {
   try {
-    const { lecturerName, sessionName } = req.body;
+    const { lecturerName, sessionName, timeLimit = 10 } = req.body;
     const sessionId = uuidv4();
     const joinCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     
     const query = `
-      INSERT INTO sessions (id, lecturer_name, session_name, join_code, status)
-      VALUES (?, ?, ?, ?, 'waiting')
+      INSERT INTO sessions (id, lecturer_name, session_name, join_code, status, time_limit)
+      VALUES (?, ?, ?, ?, 'waiting', ?)
     `;
     
-    db.run(query, [sessionId, lecturerName, sessionName, joinCode], function(err) {
+    db.run(query, [sessionId, lecturerName, sessionName, joinCode, timeLimit], function(err) {
       if (err) {
         console.error('Error creating session:', err);
         res.status(500).json({ error: 'Failed to create session' });
       } else {
         res.json({ 
           sessionId, 
-          joinCode, 
+          joinCode,
+          timeLimit,
           message: 'Session created successfully' 
         });
       }
@@ -321,20 +322,21 @@ io.on('connection', (socket) => {
     console.log('📝 Creating session:', data);
     const sessionId = uuidv4();
     const joinCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const timeLimit = data.timeLimit || 10;
     
     const query = `
-      INSERT INTO sessions (id, lecturer_name, session_name, join_code, status)
-      VALUES (?, ?, ?, ?, 'waiting')
+      INSERT INTO sessions (id, lecturer_name, session_name, join_code, status, time_limit)
+      VALUES (?, ?, ?, ?, 'waiting', ?)
     `;
     
-    db.run(query, [sessionId, data.lecturerName, data.sessionName, joinCode], function(err) {
+    db.run(query, [sessionId, data.lecturerName, data.sessionName, joinCode, timeLimit], function(err) {
       if (err) {
         console.error('Error creating session via socket:', err);
         socket.emit('session-creation-error', { error: 'Failed to create session' });
       } else {
         socket.join(sessionId);
-        socket.emit('session-created', { sessionId, joinCode });
-        console.log('✅ Session created:', { sessionId, joinCode });
+        socket.emit('session-created', { sessionId, joinCode, timeLimit });
+        console.log('✅ Session created:', { sessionId, joinCode, timeLimit });
       }
     });
   });
@@ -418,24 +420,30 @@ io.on('connection', (socket) => {
             } else {
               console.log('✅ Question saved to database:', questionId);
               
-              // Emit quiz to all students in the session
-              io.to(sessionId).emit('new-quiz', {
-                questionId,
-                question: questionResult.question,
-                options: {
-                  A: quiz.optionA,
-                  B: quiz.optionB,
-                  C: quiz.optionC,
-                  D: quiz.optionD
-                },
-                correctAnswer: quiz.correctAnswer,
-                timeLimit: 10 // 5 minutes
-              });
-              
-              console.log('📤 Quiz sent to students:', {
-                questionId,
-                question: questionResult.question,
-                correctAnswer: quiz.correctAnswer
+              // Get session time limit
+              db.get('SELECT time_limit FROM sessions WHERE id = ?', [sessionId], (err, session) => {
+                const timeLimit = session ? session.time_limit : 10;
+                
+                // Emit quiz to all students in the session
+                io.to(sessionId).emit('new-quiz', {
+                  questionId,
+                  question: questionResult.question,
+                  options: {
+                    A: quiz.optionA,
+                    B: quiz.optionB,
+                    C: quiz.optionC,
+                    D: quiz.optionD
+                  },
+                  correctAnswer: quiz.correctAnswer,
+                  timeLimit: timeLimit
+                });
+                
+                console.log('📤 Quiz sent to students:', {
+                  questionId,
+                  question: questionResult.question,
+                  correctAnswer: quiz.correctAnswer,
+                  timeLimit: timeLimit
+                });
               });
             }
           });

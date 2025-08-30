@@ -19,6 +19,8 @@ function App() {
   const [sessionData, setSessionData] = useState(null);
   const [socket, setSocket] = useState(null);
   const [currentQuiz, setCurrentQuiz] = useState(null);
+  const [allQuizzes, setAllQuizzes] = useState([]);
+  const [currentQuizIndex, setCurrentQuizIndex] = useState(0);
   const [studentId, setStudentId] = useState(null);
   const [isProcessingTranscript, setIsProcessingTranscript] = useState(false);
   const [questionDetected, setQuestionDetected] = useState(false);
@@ -251,7 +253,16 @@ function App() {
     // Set up socket listeners for student
     newSocket.on('new-quiz', (quizData) => {
       console.log('🎯 New quiz received:', quizData);
-      setCurrentQuiz(quizData);
+      
+      // Add to all quizzes array
+      setAllQuizzes(prev => {
+        const newQuizzes = [...prev, { ...quizData, answered: false, selectedAnswer: null }];
+        setCurrentQuizIndex(newQuizzes.length - 1); // Show latest quiz
+        return newQuizzes;
+      });
+      
+      // Set as current quiz
+      setCurrentQuiz({ ...quizData, answered: false, selectedAnswer: null });
     });
     
     newSocket.on('transcript-received', (data) => {
@@ -276,6 +287,37 @@ function App() {
   const handleSubmitAnswer = (questionId, studentId, answer) => {
     if (socket) {
       socket.emit('submit-answer', { questionId, studentId, answer });
+      
+      // Update the quiz in allQuizzes to mark as answered
+      setAllQuizzes(prev => prev.map(quiz => 
+        quiz.questionId === questionId 
+          ? { ...quiz, answered: true, selectedAnswer: answer }
+          : quiz
+      ));
+      
+      // Update current quiz if it's the one being answered
+      if (currentQuiz && currentQuiz.questionId === questionId) {
+        setCurrentQuiz(prev => ({ ...prev, answered: true, selectedAnswer: answer }));
+      }
+    }
+  };
+
+  const navigateToQuiz = (index) => {
+    if (index >= 0 && index < allQuizzes.length) {
+      setCurrentQuizIndex(index);
+      setCurrentQuiz(allQuizzes[index]);
+    }
+  };
+
+  const goToPreviousQuiz = () => {
+    if (currentQuizIndex > 0) {
+      navigateToQuiz(currentQuizIndex - 1);
+    }
+  };
+
+  const goToNextQuiz = () => {
+    if (currentQuizIndex < allQuizzes.length - 1) {
+      navigateToQuiz(currentQuizIndex + 1);
     }
   };
 
@@ -440,11 +482,37 @@ function App() {
             </div>
             
             {currentQuiz && (
-              <Quiz 
-                quiz={currentQuiz}
-                onSubmitAnswer={handleSubmitAnswer}
-                studentId={studentId}
-              />
+              <div className="quiz-section">
+                {allQuizzes.length > 1 && (
+                  <div className="quiz-navigation">
+                    <div className="quiz-counter">
+                      Question {currentQuizIndex + 1} of {allQuizzes.length}
+                    </div>
+                    <div className="nav-buttons">
+                      <button 
+                        onClick={goToPreviousQuiz}
+                        disabled={currentQuizIndex === 0}
+                        className="nav-button prev"
+                      >
+                        ← Previous
+                      </button>
+                      <button 
+                        onClick={goToNextQuiz}
+                        disabled={currentQuizIndex === allQuizzes.length - 1}
+                        className="nav-button next"
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <Quiz 
+                  quiz={currentQuiz}
+                  onSubmitAnswer={handleSubmitAnswer}
+                  studentId={studentId}
+                  isReadOnly={currentQuiz.answered}
+                />
+              </div>
             )}
             
             {!currentQuiz && (
@@ -467,6 +535,8 @@ function App() {
                 setUserType('');
                 setSocket(null);
                 setCurrentQuiz(null);
+                setAllQuizzes([]);
+                setCurrentQuizIndex(0);
                 setStudentId(null);
                 setFinalTranscription('');
                 setTranscription('');

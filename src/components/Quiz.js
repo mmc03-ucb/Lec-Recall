@@ -1,17 +1,25 @@
 import { useState, useEffect } from 'react';
 import './Quiz.css';
 
-const Quiz = ({ quiz, onSubmitAnswer, studentId }) => {
-  const [selectedAnswer, setSelectedAnswer] = useState('');
+const Quiz = ({ quiz, onSubmitAnswer, studentId, isReadOnly = false }) => {
+  const [selectedAnswer, setSelectedAnswer] = useState(quiz.selectedAnswer || '');
   const [timeLeft, setTimeLeft] = useState(quiz.timeLimit || 10); // 10 seconds default
-  const [submitted, setSubmitted] = useState(false);
+  const [submitted, setSubmitted] = useState(quiz.answered || false);
   const [showResults, setShowResults] = useState(false);
   const [correctAnswer, setCorrectAnswer] = useState(null);
   const [isCorrect, setIsCorrect] = useState(false);
 
   useEffect(() => {
-    if (timeLeft <= 0) {
-      handleTimeout();
+    // Reset state when quiz changes
+    setSelectedAnswer(quiz.selectedAnswer || '');
+    setSubmitted(quiz.answered || false);
+    setTimeLeft(quiz.timeLimit || 10);
+    setIsCorrect(quiz.selectedAnswer === quiz.correctAnswer);
+  }, [quiz]);
+
+  useEffect(() => {
+    // Don't run timer for read-only or already answered quizzes
+    if (isReadOnly || submitted || timeLeft <= 0) {
       return;
     }
 
@@ -20,7 +28,7 @@ const Quiz = ({ quiz, onSubmitAnswer, studentId }) => {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [timeLeft]);
+  }, [timeLeft, isReadOnly, submitted]);
 
   const handleSubmit = () => {
     if (selectedAnswer && !submitted) {
@@ -96,7 +104,7 @@ const Quiz = ({ quiz, onSubmitAnswer, studentId }) => {
               value={option}
               checked={selectedAnswer === option}
               onChange={(e) => setSelectedAnswer(e.target.value)}
-              disabled={submitted || timeLeft === 0}
+              disabled={submitted || timeLeft === 0 || isReadOnly}
             />
             <span className="option-letter">{option}.</span>
             <span className="option-text">{quiz.options[option]}</span>
@@ -105,7 +113,7 @@ const Quiz = ({ quiz, onSubmitAnswer, studentId }) => {
       </div>
       
       <div className="quiz-actions">
-        {!submitted && timeLeft > 0 && (
+        {!submitted && timeLeft > 0 && !isReadOnly && (
           <button 
             onClick={handleSubmit} 
             disabled={!selectedAnswer}

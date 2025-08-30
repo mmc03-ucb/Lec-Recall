@@ -45,6 +45,14 @@
   cursor: not-allowed;
 }
 
+.form-group small {
+  display: block;
+  margin-top: 5px;
+  font-size: 12px;
+  color: #6c757d;
+  font-style: italic;
+}
+
 .create-button {
   width: 100%;
   padding: 14px;

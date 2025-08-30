@@ -7,6 +7,7 @@ const SessionCreator = ({ onSessionCreated }) => {
   const [sessionData, setSessionData] = useState(null);
   const [lecturerName, setLecturerName] = useState('');
   const [sessionName, setSessionName] = useState('');
+  const [timeLimit, setTimeLimit] = useState(10);
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState('');
   
@@ -28,7 +29,8 @@ const SessionCreator = ({ onSessionCreated }) => {
     
     newSocket.emit('create-session', {
       lecturerName: lecturerName.trim(),
-      sessionName: sessionName.trim()
+      sessionName: sessionName.trim(),
+      timeLimit: parseInt(timeLimit)
     });
     
     newSocket.on('session-created', (data) => {
@@ -58,6 +60,7 @@ const SessionCreator = ({ onSessionCreated }) => {
     setSessionData(null);
     setLecturerName('');
     setSessionName('');
+    setTimeLimit(10);
     setError('');
   };
 
@@ -88,6 +91,19 @@ const SessionCreator = ({ onSessionCreated }) => {
               disabled={isCreating}
             />
           </div>
+          <div className="form-group">
+            <label htmlFor="timeLimit">Time Limit per Question (seconds):</label>
+            <input
+              id="timeLimit"
+              type="number"
+              min="5"
+              max="300"
+              value={timeLimit}
+              onChange={(e) => setTimeLimit(e.target.value)}
+              disabled={isCreating}
+            />
+            <small>Between 5 and 300 seconds</small>
+          </div>
           {error && <div className="error-message">{error}</div>}
           <button 
             onClick={createSession} 
@@ -112,6 +128,10 @@ const SessionCreator = ({ onSessionCreated }) => {
             <div className="info-item">
               <label>Session Name:</label>
               <span>{sessionName}</span>
+            </div>
+            <div className="info-item">
+              <label>Time Limit per Question:</label>
+              <span>{sessionData.timeLimit || timeLimit} seconds</span>
             </div>
           </div>
           <div className="instructions">

@@ -5,6 +5,7 @@ CREATE TABLE sessions (
     session_name TEXT NOT NULL,
     join_code TEXT UNIQUE NOT NULL,
     status TEXT DEFAULT 'waiting', -- waiting, active, ended
+    time_limit INTEGER DEFAULT 10, -- time limit per question in seconds
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     ended_at DATETIME NULL
 );
