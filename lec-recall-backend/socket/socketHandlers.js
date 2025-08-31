@@ -123,19 +123,19 @@ const setupSocketHandlers = (io) => {
     // Process transcript chunks
     socket.on('transcript-chunk', async (data) => {
       const { sessionId, text } = data;
-      console.log('📝 Received transcript chunk for session:', sessionId);
+      console.log('📝 Received transcript chunk for session:', sessionId, '- Text:', text);
       
       // Store transcript chunk
       const transcriptId = uuidv4();
       db.run('INSERT INTO transcripts (id, session_id, text_chunk) VALUES (?, ?, ?)', 
         [transcriptId, sessionId, text]);
       
-      // Check for questions using Gemini
+      // Check for questions using Gemini directly on the text
       try {
         const questionResult = await detectQuestion(text);
         
         if (questionResult.hasQuestion && questionResult.question) {
-          console.log('❓ Question detected:', questionResult.question);
+          console.log('❓ Educational question detected:', questionResult.question);
           
           // Emit question detected event to lecturer
           socket.emit('question-detected', { 
@@ -217,6 +217,8 @@ const setupSocketHandlers = (io) => {
           } else {
             console.log('❌ Failed to generate quiz for question');
           }
+        } else {
+          console.log('ℹ️ No educational question found in text');
         }
       } catch (error) {
         console.error('❌ Error processing transcript for questions:', error);

@@ -4,12 +4,24 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent';
 
 async function detectQuestion(transcriptText) {
-  const prompt = `The user is speaking to an audience. 
+  const prompt = `The user is speaking to an audience in an educational/lecture setting. 
 
-You must determine whether or not what the user says contains a question for the audience.
+You must determine whether or not what the user says contains a RELEVANT EDUCATIONAL QUESTION for the audience.
+
+ONLY detect questions that are:
+- Educational/academic in nature
+- Related to course content or subject matter
+- Asking for knowledge, understanding, or analysis
+- Suitable for a quiz or assessment
+
+DO NOT detect questions that are:
+- Greetings or social questions (e.g., "How are you doing today?", "Are you ready?")
+- Procedural questions (e.g., "Can you hear me?", "Should I continue?")
+- Rhetorical questions without educational value
+- Incomplete or fragmented questions
 
 Keep in mind this is transcribed text, and could have errors. 
-If there are multiple questions, say only the first complete one.
+If there are multiple questions, say only the first complete EDUCATIONAL one.
 
 Shorten question such that it is in a CONCISE quiz-format. DO NOT add any additional information.
 
@@ -18,7 +30,7 @@ Transcript: "${transcriptText}"
 Response format:
 {
   "hasQuestion": boolean,
-  "question": "extracted question or null"
+  "question": "extracted educational question or null"
 }`;
 
   try {
