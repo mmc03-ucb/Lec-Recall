@@ -449,28 +449,74 @@ const getSessionQuestions = async (req, res) => {
 const getAllSessions = async (req, res) => {
   try {
     const { lecturerId } = req.params;
+    const { status, limit = 50, offset = 0 } = req.query;
     
-    const query = `
+    let query = `
       SELECT 
-        id as sessionId,
-        session_name as sessionName,
-        lecturer_name as lecturerName,
-        join_code as joinCode,
-        status,
-        created_at as createdAt,
-        ended_at as endedAt,
-        time_limit as timeLimit
-      FROM sessions 
-      WHERE lecturer_name = ? 
-      ORDER BY created_at DESC
+        s.id as sessionId,
+        s.session_name as sessionName,
+        s.lecturer_name as lecturerName,
+        s.join_code as joinCode,
+        s.status,
+        s.created_at as createdAt,
+        s.ended_at as endedAt,
+        s.time_limit as timeLimit,
+        COUNT(DISTINCT q.id) as question_count,
+        COUNT(DISTINCT st.id) as student_count,
+        COUNT(DISTINCT sa.id) as answer_count
+      FROM sessions s
+      LEFT JOIN questions q ON s.id = q.session_id
+      LEFT JOIN students st ON s.id = st.session_id
+      LEFT JOIN student_answers sa ON q.id = sa.question_id
+      WHERE s.lecturer_name = ?
     `;
     
-    db.all(query, [lecturerId], (err, sessions) => {
+    const params = [lecturerId];
+    
+    if (status) {
+      query += ' AND s.status = ?';
+      params.push(status);
+    }
+    
+    query += `
+      GROUP BY s.id
+      ORDER BY s.created_at DESC
+      LIMIT ? OFFSET ?
+    `;
+    
+    params.push(parseInt(limit), parseInt(offset));
+    
+    db.all(query, params, (err, sessions) => {
       if (err) {
         console.error('Error getting sessions:', err);
         res.status(500).json({ error: 'Database error' });
       } else {
-        res.json({ sessions });
+        // Get total count for pagination
+        const countQuery = `
+          SELECT COUNT(*) as total
+          FROM sessions 
+          WHERE lecturer_name = ?
+          ${status ? 'AND status = ?' : ''}
+        `;
+        
+        const countParams = status ? [lecturerId, status] : [lecturerId];
+        
+        db.get(countQuery, countParams, (err, countResult) => {
+          if (err) {
+            console.error('Error getting session count:', err);
+            res.json({ sessions, pagination: { total: sessions.length, limit, offset } });
+          } else {
+            res.json({ 
+              sessions, 
+              pagination: { 
+                total: countResult.total, 
+                limit: parseInt(limit), 
+                offset: parseInt(offset),
+                hasMore: (parseInt(offset) + parseInt(limit)) < countResult.total
+              } 
+            });
+          }
+        });
       }
     });
   } catch (error) {
@@ -483,13 +529,17 @@ const getAllSessions = async (req, res) => {
 const getSessionDetails = async (req, res) => {
   try {
     const { sessionId } = req.params;
+    const { includeTranscripts = 'false' } = req.query;
     
-    const query = `
+    // Get basic session info with counts
+    const sessionQuery = `
       SELECT 
         s.*,
         COUNT(DISTINCT q.id) as question_count,
         COUNT(DISTINCT st.id) as student_count,
-        COUNT(DISTINCT sa.id) as answer_count
+        COUNT(DISTINCT sa.id) as answer_count,
+        ROUND(CAST(COUNT(CASE WHEN sa.selected_answer = q.correct_answer THEN 1 END) AS FLOAT) / 
+              COUNT(sa.id) * 100, 2) as overall_accuracy
       FROM sessions s
       LEFT JOIN questions q ON s.id = q.session_id
       LEFT JOIN students st ON s.id = st.session_id
@@ -498,14 +548,97 @@ const getSessionDetails = async (req, res) => {
       GROUP BY s.id
     `;
     
-    db.get(query, [sessionId], (err, session) => {
+    db.get(sessionQuery, [sessionId], async (err, session) => {
       if (err) {
         console.error('Error getting session details:', err);
         res.status(500).json({ error: 'Database error' });
       } else if (!session) {
         res.status(404).json({ error: 'Session not found' });
       } else {
-        res.json(session);
+        // Get students in the session
+        const studentsQuery = `
+          SELECT 
+            st.id as studentId,
+            st.name as studentName,
+            st.joined_at as joinedAt,
+            COUNT(sa.id) as questions_answered,
+            COUNT(CASE WHEN sa.selected_answer = q.correct_answer THEN 1 END) as correct_answers,
+            ROUND(CAST(COUNT(CASE WHEN sa.selected_answer = q.correct_answer THEN 1 END) AS FLOAT) / 
+                  COUNT(sa.id) * 100, 2) as accuracy_rate
+          FROM students st
+          LEFT JOIN student_answers sa ON st.id = sa.student_id
+          LEFT JOIN questions q ON sa.question_id = q.id
+          WHERE st.session_id = ?
+          GROUP BY st.id
+          ORDER BY st.joined_at ASC
+        `;
+        
+        db.all(studentsQuery, [sessionId], (err, students) => {
+          if (err) {
+            console.error('Error getting students:', err);
+            res.json({ ...session, students: [] });
+          } else {
+            // Get questions in the session
+            const questionsQuery = `
+              SELECT 
+                q.id as questionId,
+                q.formatted_question as question,
+                q.option_a, q.option_b, q.option_c, q.option_d,
+                q.correct_answer as correctAnswer,
+                q.created_at as createdAt,
+                q.timer_duration as timerDuration,
+                COUNT(sa.id) as answer_count,
+                COUNT(CASE WHEN sa.selected_answer = q.correct_answer THEN 1 END) as correct_count,
+                ROUND(CAST(COUNT(CASE WHEN sa.selected_answer = q.correct_answer THEN 1 END) AS FLOAT) / 
+                      COUNT(sa.id) * 100, 2) as success_rate
+              FROM questions q
+              LEFT JOIN student_answers sa ON q.id = sa.question_id
+              WHERE q.session_id = ?
+              GROUP BY q.id
+              ORDER BY q.created_at ASC
+            `;
+            
+            db.all(questionsQuery, [sessionId], (err, questions) => {
+              if (err) {
+                console.error('Error getting questions:', err);
+                res.json({ ...session, students, questions: [] });
+              } else {
+                let response = { 
+                  ...session, 
+                  students, 
+                  questions,
+                  summary: {
+                    totalStudents: students.length,
+                    totalQuestions: questions.length,
+                    totalAnswers: session.answer_count || 0,
+                    overallAccuracy: session.overall_accuracy || 0
+                  }
+                };
+                
+                // Include transcripts if requested
+                if (includeTranscripts === 'true') {
+                  const transcriptQuery = `
+                    SELECT text_chunk, timestamp
+                    FROM transcripts 
+                    WHERE session_id = ?
+                    ORDER BY timestamp ASC
+                  `;
+                  
+                  db.all(transcriptQuery, [sessionId], (err, transcripts) => {
+                    if (err) {
+                      console.error('Error getting transcripts:', err);
+                      res.json(response);
+                    } else {
+                      res.json({ ...response, transcripts });
+                    }
+                  });
+                } else {
+                  res.json(response);
+                }
+              }
+            });
+          }
+        });
       }
     });
   } catch (error) {
@@ -551,6 +684,263 @@ const getStudentSessions = async (req, res) => {
     });
   } catch (error) {
     console.error('Error in getStudentSessions:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// Update session status (active, ended, archived)
+const updateSessionStatus = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { status } = req.body;
+    
+    if (!['waiting', 'active', 'ended', 'archived'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status. Must be waiting, active, ended, or archived' });
+    }
+    
+    const query = `
+      UPDATE sessions 
+      SET status = ?, 
+          ended_at = CASE WHEN ? = 'ended' THEN CURRENT_TIMESTAMP ELSE ended_at END
+      WHERE id = ?
+    `;
+    
+    db.run(query, [status, status, sessionId], function(err) {
+      if (err) {
+        console.error('Error updating session status:', err);
+        res.status(500).json({ error: 'Database error' });
+      } else if (this.changes === 0) {
+        res.status(404).json({ error: 'Session not found' });
+      } else {
+        res.json({ 
+          message: 'Session status updated successfully',
+          sessionId,
+          status,
+          updatedAt: new Date().toISOString()
+        });
+      }
+    });
+  } catch (error) {
+    console.error('Error in updateSessionStatus:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// Delete session and all related data
+const deleteSession = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    // Start a transaction to delete all related data
+    db.serialize(() => {
+      db.run('BEGIN TRANSACTION');
+      
+      // Delete in order to respect foreign key constraints
+      db.run('DELETE FROM student_answers WHERE question_id IN (SELECT id FROM questions WHERE session_id = ?)', [sessionId]);
+      db.run('DELETE FROM questions WHERE session_id = ?', [sessionId]);
+      db.run('DELETE FROM students WHERE session_id = ?', [sessionId]);
+      db.run('DELETE FROM transcripts WHERE session_id = ?', [sessionId]);
+      db.run('DELETE FROM sessions WHERE id = ?', [sessionId], function(err) {
+        if (err) {
+          console.error('Error deleting session:', err);
+          db.run('ROLLBACK');
+          res.status(500).json({ error: 'Database error' });
+        } else if (this.changes === 0) {
+          db.run('ROLLBACK');
+          res.status(404).json({ error: 'Session not found' });
+        } else {
+          db.run('COMMIT');
+          res.json({ 
+            message: 'Session and all related data deleted successfully',
+            sessionId
+          });
+        }
+      });
+    });
+  } catch (error) {
+    console.error('Error in deleteSession:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// Export session data for backup or analysis
+const exportSessionData = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { format = 'json' } = req.query;
+    
+    if (!['json', 'csv'].includes(format)) {
+      return res.status(400).json({ error: 'Invalid format. Must be json or csv' });
+    }
+    
+    // Get complete session data
+    const sessionQuery = `
+      SELECT * FROM sessions WHERE id = ?
+    `;
+    
+    db.get(sessionQuery, [sessionId], (err, session) => {
+      if (err) {
+        console.error('Error getting session:', err);
+        res.status(500).json({ error: 'Database error' });
+      } else if (!session) {
+        res.status(404).json({ error: 'Session not found' });
+      } else {
+        // Get all related data
+        const studentsQuery = 'SELECT * FROM students WHERE session_id = ?';
+        const questionsQuery = 'SELECT * FROM questions WHERE session_id = ?';
+        const answersQuery = `
+          SELECT sa.*, q.formatted_question, st.name as student_name
+          FROM student_answers sa
+          JOIN questions q ON sa.question_id = q.id
+          JOIN students st ON sa.student_id = st.id
+          WHERE q.session_id = ?
+        `;
+        const transcriptsQuery = 'SELECT * FROM transcripts WHERE session_id = ?';
+        
+        db.all(studentsQuery, [sessionId], (err, students) => {
+          if (err) {
+            console.error('Error getting students:', err);
+            res.status(500).json({ error: 'Database error' });
+          } else {
+            db.all(questionsQuery, [sessionId], (err, questions) => {
+              if (err) {
+                console.error('Error getting questions:', err);
+                res.status(500).json({ error: 'Database error' });
+              } else {
+                db.all(answersQuery, [sessionId], (err, answers) => {
+                  if (err) {
+                    console.error('Error getting answers:', err);
+                    res.status(500).json({ error: 'Database error' });
+                  } else {
+                    db.all(transcriptsQuery, [sessionId], (err, transcripts) => {
+                      if (err) {
+                        console.error('Error getting transcripts:', err);
+                        res.status(500).json({ error: 'Database error' });
+                      } else {
+                        const exportData = {
+                          session,
+                          students,
+                          questions,
+                          answers,
+                          transcripts,
+                          exportDate: new Date().toISOString(),
+                          exportFormat: format
+                        };
+                        
+                        if (format === 'csv') {
+                          // Convert to CSV format (simplified)
+                          res.setHeader('Content-Type', 'text/csv');
+                          res.setHeader('Content-Disposition', `attachment; filename="session-${sessionId}.csv"`);
+                          res.send(JSON.stringify(exportData, null, 2));
+                        } else {
+                          res.json(exportData);
+                        }
+                      }
+                    });
+                  }
+                });
+              }
+            });
+          }
+        });
+      }
+    });
+  } catch (error) {
+    console.error('Error in exportSessionData:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// Get lecturer statistics across all sessions
+const getLecturerStatistics = async (req, res) => {
+  try {
+    const { lecturerId } = req.params;
+    const { timeRange = 'all' } = req.query; // all, week, month, year
+    
+    let timeFilter = '';
+    const params = [lecturerId];
+    
+    if (timeRange !== 'all') {
+      const now = new Date();
+      let startDate;
+      
+      switch (timeRange) {
+        case 'week':
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case 'month':
+          startDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+          break;
+        case 'year':
+          startDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+          break;
+        default:
+          startDate = new Date(0);
+      }
+      
+      timeFilter = 'AND s.created_at >= ?';
+      params.push(startDate.toISOString());
+    }
+    
+    const query = `
+      SELECT 
+        COUNT(DISTINCT s.id) as total_sessions,
+        COUNT(DISTINCT st.id) as total_students,
+        COUNT(DISTINCT q.id) as total_questions,
+        COUNT(DISTINCT sa.id) as total_answers,
+        ROUND(CAST(COUNT(CASE WHEN sa.selected_answer = q.correct_answer THEN 1 END) AS FLOAT) / 
+              COUNT(sa.id) * 100, 2) as overall_accuracy,
+        AVG(CAST(s.time_limit AS FLOAT)) as avg_time_limit,
+        COUNT(CASE WHEN s.status = 'ended' THEN 1 END) as completed_sessions,
+        COUNT(CASE WHEN s.status = 'active' THEN 1 END) as active_sessions
+      FROM sessions s
+      LEFT JOIN students st ON s.id = st.session_id
+      LEFT JOIN questions q ON s.id = q.session_id
+      LEFT JOIN student_answers sa ON q.id = sa.question_id
+      WHERE s.lecturer_name = ? ${timeFilter}
+    `;
+    
+    db.get(query, params, (err, stats) => {
+      if (err) {
+        console.error('Error getting lecturer statistics:', err);
+        res.status(500).json({ error: 'Database error' });
+      } else {
+        // Get recent activity
+        const recentQuery = `
+          SELECT 
+            s.id as sessionId,
+            s.session_name as sessionName,
+            s.created_at as createdAt,
+            s.status,
+            COUNT(DISTINCT st.id) as student_count,
+            COUNT(DISTINCT q.id) as question_count
+          FROM sessions s
+          LEFT JOIN students st ON s.id = st.session_id
+          LEFT JOIN questions q ON s.id = q.session_id
+          WHERE s.lecturer_name = ? ${timeFilter}
+          GROUP BY s.id
+          ORDER BY s.created_at DESC
+          LIMIT 5
+        `;
+        
+        db.all(recentQuery, params, (err, recentSessions) => {
+          if (err) {
+            console.error('Error getting recent sessions:', err);
+            res.json({ ...stats, recentSessions: [] });
+          } else {
+            res.json({
+              lecturerId,
+              timeRange,
+              statistics: stats,
+              recentSessions,
+              generatedAt: new Date().toISOString()
+            });
+          }
+        });
+      }
+    });
+  } catch (error) {
+    console.error('Error in getLecturerStatistics:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -668,6 +1058,12 @@ app.get('/api/lecturer/:lecturerId/sessions', getAllSessions);
 app.get('/api/sessions/:sessionId/details', getSessionDetails);
 app.get('/api/student/:studentId/sessions', getStudentSessions);
 app.get('/api/analytics/:sessionId/student/:studentId', getStudentAnalytics);
+
+// Additional Phase 7 endpoints for enhanced data persistence and retrieval
+app.put('/api/sessions/:sessionId/status', updateSessionStatus);
+app.delete('/api/sessions/:sessionId', deleteSession);
+app.get('/api/sessions/:sessionId/export', exportSessionData);
+app.get('/api/lecturer/:lecturerId/statistics', getLecturerStatistics);
 
 // Generate lecture summary
 app.post('/api/sessions/:sessionId/summary', async (req, res) => {
