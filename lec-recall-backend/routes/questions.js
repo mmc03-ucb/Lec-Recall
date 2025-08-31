@@ -6,13 +6,17 @@ const {
   submitAnswer,
   getSessionQuestions,
   generateLectureSummary,
-  generateStudentReviewHandler
+  generateStudentReviewHandler,
+  updateQuestion,
+  getQuestionDetails
 } = require('../controllers/questionController');
 
 // Question management routes
 router.post('/detect', detectQuestionHandler);
 router.post('/generate-quiz', generateQuizHandler);
 router.get('/session/:sessionId', getSessionQuestions);
+router.get('/:questionId/details', getQuestionDetails);
+router.put('/:questionId', updateQuestion);
 
 // Answer submission
 router.post('/answers/submit', submitAnswer);

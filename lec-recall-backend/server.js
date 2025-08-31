@@ -88,6 +88,8 @@ app.get('/api', (req, res) => {
         'POST /api/questions/detect': 'Detect question from text',
         'POST /api/questions/generate-quiz': 'Generate quiz from question',
         'GET /api/questions/session/:sessionId': 'Get all questions for session',
+        'GET /api/questions/:questionId/details': 'Get question details for editing',
+        'PUT /api/questions/:questionId': 'Update/modify a question',
         'POST /api/questions/answers/submit': 'Submit student answer',
         'POST /api/questions/sessions/:sessionId/summary': 'Generate lecture summary',
         'POST /api/questions/sessions/:sessionId/student/:studentId/review': 'Generate student review'
