@@ -487,17 +487,35 @@ function App() {
       <div className="container">
         <header>
           <div className="header-top">
-            <button 
-              className="theme-toggle"
-              onClick={toggleDarkMode}
-              aria-label={`Switch to ${darkMode ? 'light' : 'dark'} mode`}
-              title={`Switch to ${darkMode ? 'light' : 'dark'} mode`}
-            >
-              <span aria-hidden="true">{darkMode ? '☀️' : '🌙'}</span>
-            </button>
+            <div className="header-left">
+              <div className="app-logo">
+                <div className="app-logo-icon">
+                  <span aria-hidden="true">🎓</span>
+                </div>
+                <span>Lec-Recall</span>
+              </div>
+            </div>
+            <div className="header-right">
+              <button 
+                className="theme-toggle"
+                onClick={toggleDarkMode}
+                aria-label={`Switch to ${darkMode ? 'light' : 'dark'} mode`}
+                title={`Switch to ${darkMode ? 'light' : 'dark'} mode`}
+              >
+                <span aria-hidden="true">{darkMode ? '☀️' : '🌙'}</span>
+              </button>
+            </div>
           </div>
-          <h1 className="title">Welcome to Lec-Recall</h1>
-          <p className="subtitle">Your intelligent learning companion</p>
+          
+          {!userType && !sessionData && (
+            <div className="welcome-section">
+              <h1 className="title">Welcome to Lec-Recall</h1>
+              <p className="subtitle">Your intelligent learning companion</p>
+              <p className="welcome-description">
+                Transform your lectures with AI-powered question detection and real-time student engagement.
+              </p>
+            </div>
+          )}
         </header>
         
         <main id="main-content" role="main">
@@ -505,7 +523,12 @@ function App() {
         {/* User Type Selection */}
         {!userType && !sessionData && (
           <section className="user-selection" aria-labelledby="role-selection-heading">
-            <h2 id="role-selection-heading">Choose your role:</h2>
+            <div className="role-selection-header">
+              <h2 id="role-selection-heading">Choose your role:</h2>
+              <p className="role-selection-subtitle">
+                Select how you'd like to participate in the learning experience
+              </p>
+            </div>
             <div className="role-buttons" role="group" aria-labelledby="role-selection-heading">
               <button 
                 className="role-button lecturer"
