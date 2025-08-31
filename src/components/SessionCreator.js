@@ -65,10 +65,10 @@ const SessionCreator = ({ onSessionCreated }) => {
   };
 
   return (
-    <div className="session-creator">
+    <section className="session-creator" aria-labelledby="session-creator-heading">
       {!sessionData ? (
-        <div className="create-session-form">
-          <h2>Create New Session</h2>
+        <form className="create-session-form" onSubmit={(e) => { e.preventDefault(); createSession(); }}>
+          <h2 id="session-creator-heading">Create New Session</h2>
           <div className="form-group">
             <label htmlFor="lecturerName">Your Name:</label>
             <input
@@ -78,7 +78,10 @@ const SessionCreator = ({ onSessionCreated }) => {
               onChange={(e) => setLecturerName(e.target.value)}
               placeholder="Enter your name"
               disabled={isCreating}
+              required
+              aria-describedby="lecturer-name-help"
             />
+            <small id="lecturer-name-help">This will be displayed to students joining your session</small>
           </div>
           <div className="form-group">
             <label htmlFor="sessionName">Session Name:</label>
@@ -89,7 +92,10 @@ const SessionCreator = ({ onSessionCreated }) => {
               onChange={(e) => setSessionName(e.target.value)}
               placeholder="Enter session name"
               disabled={isCreating}
+              required
+              aria-describedby="session-name-help"
             />
+            <small id="session-name-help">A descriptive name for your lecture session</small>
           </div>
           <div className="form-group">
             <label htmlFor="timeLimit">Time Limit per Question (seconds):</label>
@@ -101,21 +107,31 @@ const SessionCreator = ({ onSessionCreated }) => {
               value={timeLimit}
               onChange={(e) => setTimeLimit(e.target.value)}
               disabled={isCreating}
+              aria-describedby="time-limit-help"
             />
-            <small>Between 5 and 300 seconds</small>
+            <small id="time-limit-help">Between 5 and 300 seconds - how long students have to answer each question</small>
           </div>
-          {error && <div className="error-message">{error}</div>}
+          {error && (
+            <div className="error-message" role="alert" aria-live="polite">
+              {error}
+            </div>
+          )}
           <button 
-            onClick={createSession} 
+            type="submit"
             disabled={isCreating || !lecturerName.trim() || !sessionName.trim()}
             className="create-button"
+            data-loading={isCreating}
+            aria-describedby="create-button-help"
           >
-            {isCreating ? 'Creating...' : 'Create Session'}
+            {isCreating ? 'Creating Session...' : 'Create Session'}
           </button>
-        </div>
+          <div id="create-button-help" className="sr-only">
+            {isCreating ? 'Please wait while your session is being created' : 'Click to create your lecture session'}
+          </div>
+        </form>
       ) : (
-        <div className="session-created">
-          <h2>Session Created Successfully!</h2>
+        <div className="session-created" role="status" aria-live="polite">
+          <h3>Session Created Successfully!</h3>
           <div className="session-info">
             <div className="info-item">
               <label>Session ID:</label>
@@ -143,7 +159,7 @@ const SessionCreator = ({ onSessionCreated }) => {
           </button>
         </div>
       )}
-    </div>
+    </section>
   );
 };
 

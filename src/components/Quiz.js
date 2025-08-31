@@ -99,49 +99,74 @@ const Quiz = ({ quiz, onSubmitAnswer, studentId, isReadOnly = false }) => {
   };
 
   return (
-    <div className="quiz-container">
+    <div className={`quiz-container ${submitted ? 'quiz-completed' : ''} ${timeLeft === 0 && !submitted ? 'quiz-timeout' : ''}`} role="region" aria-labelledby="quiz-question">
       <div className="quiz-header">
-        <div className="timer" style={{ color: getTimeColor() }}>
-          Time left: {formatTime(timeLeft)}
+        <div 
+          className={`timer ${getTimeColor()}`}
+          role="timer"
+          aria-live="polite"
+          aria-label={`Time remaining: ${formatTime(timeLeft)}`}
+        >
+          <span className="sr-only">Time left: </span>
+          {formatTime(timeLeft)}
         </div>
         {submitted && (
-          <div className={`result-indicator ${isCorrect ? 'correct' : 'incorrect'}`}>
+          <div 
+            className={`result-indicator ${isCorrect ? 'correct' : 'incorrect'}`}
+            role="status"
+            aria-live="polite"
+          >
             {isCorrect ? '✅ Correct!' : '❌ Incorrect'}
           </div>
         )}
       </div>
 
+      {timeLeft === 0 && !submitted && (
+        <div className="timeout-message" role="alert">
+          ⏰ Time's up! The quiz has ended.
+        </div>
+      )}
+
       <div className="question-section">
-        <h3 className="question-text">{quiz.question}</h3>
+        <h3 id="quiz-question" className="question-text">{quiz.question}</h3>
       </div>
       
-      <div className="options-section">
+      <fieldset className="options-section" disabled={submitted || timeLeft === 0 || quiz.timedOut || isReadOnly}>
+        <legend className="sr-only">Choose your answer</legend>
         {['A', 'B', 'C', 'D'].map(option => (
-          <label key={option} className={`option ${getOptionClass(option)}`}>
+          <label 
+            key={option} 
+            className={`option ${getOptionClass(option)} ${submitted || timeLeft === 0 || quiz.timedOut || isReadOnly ? 'disabled' : ''}`}
+          >
             <input
               type="radio"
-              name="answer"
+              name="quiz-answer"
               value={option}
               checked={selectedAnswer === option}
               onChange={(e) => setSelectedAnswer(e.target.value)}
               disabled={submitted || timeLeft === 0 || quiz.timedOut || isReadOnly}
+              aria-describedby={`option-${option}-text`}
             />
-            <span className="option-letter">{option}.</span>
-            <span className="option-text">{quiz.options[option]}</span>
+            <span className="option-letter" aria-hidden="true">{option}</span>
+            <span id={`option-${option}-text`} className="option-text">{quiz.options[option]}</span>
           </label>
         ))}
-      </div>
+      </fieldset>
       
       <div className="quiz-actions">
         {!submitted && timeLeft > 0 && !quiz.timedOut && !isReadOnly && (
           <button 
             onClick={handleSubmit} 
             disabled={!selectedAnswer}
-            className="submit-button"
+            className={`submit-button ${!selectedAnswer ? 'disabled' : ''}`}
+            aria-describedby="submit-help"
           >
-            Submit Answer
+            {!selectedAnswer ? 'Select an answer first' : 'Submit Answer'}
           </button>
         )}
+        <div id="submit-help" className="sr-only">
+          {!selectedAnswer ? 'Please select an answer before submitting' : 'Click to submit your selected answer'}
+        </div>
         
         {submitted && (
           <div className="submission-status">

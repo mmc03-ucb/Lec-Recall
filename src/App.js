@@ -30,6 +30,12 @@ function App() {
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [studentAnalytics, setStudentAnalytics] = useState(null);
   const [showStudentResults, setShowStudentResults] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => {
+    // Check for saved theme preference or default to system preference
+    const saved = localStorage.getItem('lec-recall-theme');
+    if (saved) return saved === 'dark';
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
   
   // Refs
   const connectionRef = useRef(null);
@@ -41,6 +47,12 @@ function App() {
   const DEEPGRAM_API_KEY = process.env.REACT_APP_DEEPGRAM_API_KEY;
   const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5001';
   
+  // Dark mode effect
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+    localStorage.setItem('lec-recall-theme', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
+
   // Debug environment variable loading
   useEffect(() => {
     console.log('🔑 Environment Variables Status:');
@@ -52,6 +64,10 @@ function App() {
       setError('Deepgram API key not configured. Please check environment variables.');
     }
   }, [DEEPGRAM_API_KEY, BACKEND_URL]);
+
+  const toggleDarkMode = () => {
+    setDarkMode(!darkMode);
+  };
 
   const startMediaRecorder = (stream, connection) => {
     // Set up MediaRecorder with fallback MIME types
@@ -465,29 +481,50 @@ function App() {
 
   return (
     <div className="App">
+      {/* Skip to main content for screen readers */}
+      <a href="#main-content" className="skip-link">Skip to main content</a>
+      
       <div className="container">
-        <h1 className="title">Welcome to Lec-Recall</h1>
-        <p className="subtitle">Your learning companion</p>
+        <header>
+          <div className="header-top">
+            <button 
+              className="theme-toggle"
+              onClick={toggleDarkMode}
+              aria-label={`Switch to ${darkMode ? 'light' : 'dark'} mode`}
+              title={`Switch to ${darkMode ? 'light' : 'dark'} mode`}
+            >
+              <span aria-hidden="true">{darkMode ? '☀️' : '🌙'}</span>
+            </button>
+          </div>
+          <h1 className="title">Welcome to Lec-Recall</h1>
+          <p className="subtitle">Your intelligent learning companion</p>
+        </header>
+        
+        <main id="main-content" role="main">
         
         {/* User Type Selection */}
         {!userType && !sessionData && (
-          <div className="user-selection">
-            <h2>Choose your role:</h2>
-            <div className="role-buttons">
+          <section className="user-selection" aria-labelledby="role-selection-heading">
+            <h2 id="role-selection-heading">Choose your role:</h2>
+            <div className="role-buttons" role="group" aria-labelledby="role-selection-heading">
               <button 
                 className="role-button lecturer"
                 onClick={() => setUserType('lecturer')}
+                aria-label="Select lecturer role to create and manage sessions"
               >
+                <span aria-hidden="true">👨‍🏫</span>
                 I'm a Lecturer
               </button>
               <button 
                 className="role-button student"
                 onClick={() => setUserType('student')}
+                aria-label="Select student role to join and participate in sessions"
               >
+                <span aria-hidden="true">👨‍🎓</span>
                 I'm a Student
               </button>
             </div>
-          </div>
+          </section>
         )}
         
         {/* Session Creator for Lecturers */}
@@ -502,15 +539,19 @@ function App() {
         
         {/* Session Active - Lecturer View */}
         {userType === 'lecturer' && sessionData && (
-          <div className="lecturer-view">
+          <section className="lecturer-view" aria-labelledby="lecturer-session-heading">
             <div className="session-info">
-              <h3>Session Active</h3>
-              <p>Join Code: <strong>{sessionData.joinCode}</strong></p>
-              <p>Session ID: {sessionData.sessionId}</p>
+              <h3 id="lecturer-session-heading">Session Active</h3>
+              <p>Join Code: <strong aria-label="Join code for students">{sessionData.joinCode}</strong></p>
+              <p>Session ID: <span className="sr-only">Session identifier: </span>{sessionData.sessionId}</p>
             </div>
             
-            <div className="status-section">
-              <div className={`status-indicator ${isTranscribing ? 'recording' : micPermission === 'granted' ? 'connected' : micPermission === 'denied' ? 'disconnected' : 'unknown'}`}>
+            <div className="status-section" role="status" aria-live="polite">
+              <div 
+                className={`status-indicator ${isTranscribing ? 'recording' : micPermission === 'granted' ? 'connected' : micPermission === 'denied' ? 'disconnected' : 'unknown'}`}
+                aria-label={`Microphone status: ${isTranscribing ? 'Currently recording' : micPermission === 'granted' ? 'Ready to record' : micPermission === 'denied' ? 'Access denied' : 'Status unknown'}`}
+              >
+                <span aria-hidden="true">🎤</span>
                 Mic: {isTranscribing ? 'Recording' : micPermission === 'granted' ? 'Ready' : micPermission === 'denied' ? 'Denied' : 'Unknown'}
               </div>
             </div>
@@ -521,14 +562,18 @@ function App() {
                   className="start-button"
                   onClick={handleStart}
                   disabled={micPermission === 'denied'}
+                  aria-label="Start recording lecture audio for automatic question detection"
                 >
+                  <span aria-hidden="true">🎤</span>
                   Start Recording
                 </button>
               ) : (
                 <button 
                   className="stop-button"
                   onClick={handleStop}
+                  aria-label="Stop recording lecture audio"
                 >
+                  <span aria-hidden="true">⏹️</span>
                   Stop Recording
                 </button>
               )}
@@ -538,11 +583,12 @@ function App() {
                 className="stop-session-button"
                 onClick={handleStopSession}
                 disabled={showAnalytics}
+                aria-label={showAnalytics ? 'Session has ended' : 'End session and view comprehensive analytics'}
               >
+                <span aria-hidden="true">{showAnalytics ? '✅' : '📊'}</span>
                 {showAnalytics ? 'Session Ended' : 'Stop Session & View Analytics'}
               </button>
               
-
             </div>
             
             {error && (
@@ -770,16 +816,16 @@ function App() {
                 )}
               </div>
             )}
-          </div>
+          </section>
         )}
         
         {/* Session Active - Student View */}
         {userType === 'student' && sessionData && !showStudentResults && (
-          <div className="student-view">
+          <section className="student-view" aria-labelledby="student-session-heading">
             <div className="session-info">
-              <h3>Connected to Session</h3>
-              <p>Session ID: {sessionData.sessionId}</p>
-              <p>Student ID: {studentId}</p>
+              <h3 id="student-session-heading">Connected to Session</h3>
+              <p>Session ID: <span className="sr-only">Session identifier: </span>{sessionData.sessionId}</p>
+              <p>Student ID: <span className="sr-only">Your student identifier: </span>{studentId}</p>
             </div>
             
             {currentQuiz && (
@@ -822,13 +868,16 @@ function App() {
                 <p>The lecturer will start recording and questions will appear automatically.</p>
               </div>
             )}
-          </div>
+          </section>
         )}
         
         {/* Student Results View */}
         {userType === 'student' && showStudentResults && studentAnalytics && (
-          <div className="student-results">
-            <h3>📊 Your Session Results</h3>
+          <section className="student-results" aria-labelledby="student-results-heading">
+            <h3 id="student-results-heading">
+              <span aria-hidden="true">📊</span>
+              Your Session Results
+            </h3>
             
             {/* Student Performance Summary */}
             <div className="student-summary">
@@ -924,7 +973,7 @@ function App() {
                 </div>
               )}
             </div>
-          </div>
+          </section>
         )}
         
         {/* Reset Button */}
@@ -950,12 +999,16 @@ function App() {
                 setStudentAnalytics(null);
                 setShowStudentResults(false);
                 setError('');
+                // Keep dark mode preference - don't reset it
               }}
+              aria-label="Reset application and start over"
             >
               Start Over
             </button>
           </div>
         )}
+        
+        </main>
       </div>
     </div>
   );

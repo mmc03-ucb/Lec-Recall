@@ -65,10 +65,10 @@ const StudentJoin = ({ onSessionJoined }) => {
   };
 
   return (
-    <div className="student-join">
+    <section className="student-join" aria-labelledby="student-join-heading">
       {!joined ? (
-        <div className="join-session-form">
-          <h2>Join Session</h2>
+        <form className="join-session-form" onSubmit={(e) => { e.preventDefault(); joinSession(); }}>
+          <h2 id="student-join-heading">Join Session</h2>
           <div className="form-group">
             <label htmlFor="studentName">Your Name:</label>
             <input
@@ -78,7 +78,10 @@ const StudentJoin = ({ onSessionJoined }) => {
               onChange={(e) => setStudentName(e.target.value)}
               placeholder="Enter your name"
               disabled={isJoining}
+              required
+              aria-describedby="student-name-help"
             />
+            <small id="student-name-help">This will be visible to your lecturer and classmates</small>
           </div>
           <div className="form-group">
             <label htmlFor="joinCode">Join Code:</label>
@@ -86,22 +89,35 @@ const StudentJoin = ({ onSessionJoined }) => {
               id="joinCode"
               type="text"
               value={joinCode}
-              onChange={(e) => setJoinCode(e.target.value)}
+              onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
               placeholder="Enter join code"
               disabled={isJoining}
               maxLength={6}
-              style={{ textTransform: 'uppercase' }}
+              className="join-code-input"
+              required
+              aria-describedby="join-code-help"
+              pattern="[A-Z0-9]{6}"
             />
+            <small id="join-code-help">6-character code provided by your lecturer</small>
           </div>
-          {error && <div className="error-message">{error}</div>}
+          {error && (
+            <div className="error-message" role="alert" aria-live="polite">
+              {error}
+            </div>
+          )}
           <button 
-            onClick={joinSession} 
+            type="submit"
             disabled={isJoining || !joinCode.trim() || !studentName.trim()}
             className="join-button"
+            data-loading={isJoining}
+            aria-describedby="join-button-help"
           >
-            {isJoining ? 'Joining...' : 'Join Session'}
+            {isJoining ? 'Joining Session...' : 'Join Session'}
           </button>
-        </div>
+          <div id="join-button-help" className="sr-only">
+            {isJoining ? 'Please wait while joining the session' : 'Click to join the lecture session'}
+          </div>
+        </form>
       ) : (
         <div className="session-joined">
           <h2>Successfully Joined!</h2>
@@ -128,7 +144,7 @@ const StudentJoin = ({ onSessionJoined }) => {
           </button>
         </div>
       )}
-    </div>
+    </section>
   );
 };
 
