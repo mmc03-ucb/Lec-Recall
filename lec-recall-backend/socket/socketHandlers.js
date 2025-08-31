@@ -542,6 +542,47 @@ const setupSocketHandlers = (io) => {
       });
     });
 
+    // Student signals confusion
+    socket.on('signal-confusion', (data) => {
+      const { sessionId, studentId, confusionLevel } = data;
+      console.log('😵 Student confusion signal:', { sessionId, studentId, confusionLevel });
+      
+      // Store confusion signal in database (you might want to create a confusion_signals table)
+      const confusionId = uuidv4();
+      const timestamp = new Date().toISOString();
+      
+      // Emit to ALL sockets in the session (including lecturer)
+      io.to(sessionId).emit('confusion-signal', {
+        confusionId,
+        studentId,
+        confusionLevel,
+        timestamp
+      });
+      
+      // Acknowledge to the student
+      socket.emit('confusion-signal-received', { confusionId, timestamp });
+    });
+
+    // Get current confusion meter status for lecturer
+    socket.on('get-confusion-status', (data) => {
+      const { sessionId } = data;
+      console.log('📊 Getting confusion status for session:', sessionId);
+      
+      // Get current students count
+      db.get('SELECT COUNT(*) as student_count FROM students WHERE session_id = ?', [sessionId], (err, result) => {
+        if (err) {
+          console.error('Error getting student count:', err);
+          socket.emit('confusion-status', { error: 'Failed to get confusion status' });
+          return;
+        }
+        
+        socket.emit('confusion-status', {
+          totalStudents: result.student_count || 0,
+          timestamp: new Date().toISOString()
+        });
+      });
+    });
+
     // Get current quiz status for lecturer
     socket.on('get-quiz-status', (data) => {
       const { sessionId } = data;

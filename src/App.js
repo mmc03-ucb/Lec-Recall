@@ -37,6 +37,11 @@ function App() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
   
+  // Confusion meter state
+  const [confusionSignals, setConfusionSignals] = useState([]);
+  const [lastConfusionSignal, setLastConfusionSignal] = useState(null);
+  const [confusionLevel, setConfusionLevel] = useState(null); // null = no selection, 0 = clear, 1 = slightly confused, 2 = very confused
+  
   // Refs
   const connectionRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -299,6 +304,25 @@ function App() {
       console.error('Error stopping session:', data.error);
       setError('Failed to stop session: ' + data.error);
     });
+    
+    // Listen for confusion signals from students
+    newSocket.on('confusion-signal', (data) => {
+      console.log('😵 Confusion signal received:', data);
+      setConfusionSignals(prev => {
+        // Keep only recent signals (last 30 seconds)
+        const now = new Date();
+        const recent = prev.filter(signal => 
+          (now - new Date(signal.timestamp)) < 30000
+        );
+        return [...recent, data];
+      });
+      setLastConfusionSignal(data);
+      
+      // Auto-clear the last signal indicator after 5 seconds
+      setTimeout(() => {
+        setLastConfusionSignal(null);
+      }, 5000);
+    });
   };
 
   const handleSessionJoined = (data, newSocket) => {
@@ -400,6 +424,15 @@ function App() {
       setShowStudentResults(true);
       setError(''); // Clear any previous errors
     });
+    
+    // Listen for confusion signal acknowledgment
+    newSocket.on('confusion-signal-received', (data) => {
+      console.log('✅ Confusion signal acknowledged:', data);
+      // Reset confusion level after successful signal
+      setTimeout(() => {
+        setConfusionLevel(0);
+      }, 2000);
+    });
   };
 
   const handleSubmitAnswer = (questionId, studentId, answer) => {
@@ -469,6 +502,19 @@ function App() {
     if (socket && sessionData) {
       console.log('🛑 Stopping session:', sessionData.sessionId);
       socket.emit('stop-session', sessionData.sessionId);
+    }
+  };
+
+  // Confusion meter handlers
+  const handleConfusionSignal = (level) => {
+    if (socket && sessionData && studentId) {
+      console.log('😵 Sending confusion signal:', level);
+      setConfusionLevel(level);
+      socket.emit('signal-confusion', {
+        sessionId: sessionData.sessionId,
+        studentId: studentId,
+        confusionLevel: level
+      });
     }
   };
 
@@ -569,13 +615,105 @@ function App() {
               <p>Session ID: <span className="sr-only">Session identifier: </span>{sessionData.sessionId}</p>
             </div>
             
-            <div className="status-section" role="status" aria-live="polite">
-              <div 
-                className={`status-indicator ${isTranscribing ? 'recording' : micPermission === 'granted' ? 'connected' : micPermission === 'denied' ? 'disconnected' : 'unknown'}`}
-                aria-label={`Microphone status: ${isTranscribing ? 'Currently recording' : micPermission === 'granted' ? 'Ready to record' : micPermission === 'denied' ? 'Access denied' : 'Status unknown'}`}
-              >
-                <span aria-hidden="true">🎤</span>
-                Mic: {isTranscribing ? 'Recording' : micPermission === 'granted' ? 'Ready' : micPermission === 'denied' ? 'Denied' : 'Unknown'}
+            {/* Dashboard Section */}
+            <div className="lecturer-dashboard" role="region" aria-labelledby="dashboard-heading">
+              <h3 id="dashboard-heading" className="sr-only">Lecture Dashboard</h3>
+              
+              <div className="dashboard-grid">
+                {/* Recording Status Card */}
+                <div className="dashboard-card status-card">
+                  <div className="card-header">
+                    <span className="card-icon" aria-hidden="true">🎤</span>
+                    <span className="card-title">Recording Status</span>
+                  </div>
+                  <div className="card-content">
+                    <div 
+                      className={`status-badge ${isTranscribing ? 'recording' : micPermission === 'granted' ? 'ready' : micPermission === 'denied' ? 'error' : 'unknown'}`}
+                      aria-label={`Microphone status: ${isTranscribing ? 'Currently recording' : micPermission === 'granted' ? 'Ready to record' : micPermission === 'denied' ? 'Access denied' : 'Status unknown'}`}
+                    >
+                      <span className="status-dot"></span>
+                      <span className="status-text">
+                        {isTranscribing ? 'Recording' : micPermission === 'granted' ? 'Ready' : micPermission === 'denied' ? 'Access Denied' : 'Unknown'}
+                      </span>
+                    </div>
+                    {isTranscribing && (
+                      <div className="recording-time">
+                        <span className="time-label">Live Recording</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                        {/* Confusion Metrics Card */}
+        <div className="dashboard-card confusion-card">
+          <div className="card-header">
+            <span className="card-icon" aria-hidden="true">🤔</span>
+            <span className="card-title">Class Understanding</span>
+          </div>
+          <div className="card-content">
+            <div className="confusion-metrics">
+              <div className="metric clear-metric">
+                <span className="metric-icon">😊</span>
+                <span className="metric-value">{confusionSignals.filter(s => s.confusionLevel === 0).length}</span>
+                <span className="metric-label">Clear</span>
+              </div>
+              <div className="metric confused-metric">
+                <span className="metric-icon">😐</span>
+                <span className="metric-value">{confusionSignals.filter(s => s.confusionLevel === 1).length}</span>
+                <span className="metric-label">Confused</span>
+              </div>
+              <div className="metric very-confused-metric">
+                <span className="metric-icon">😵</span>
+                <span className="metric-value">{confusionSignals.filter(s => s.confusionLevel === 2).length}</span>
+                <span className="metric-label">Very Confused</span>
+              </div>
+            </div>
+
+            {lastConfusionSignal && (
+              <div className="recent-signal" role="alert">
+                <div className="signal-pulse"></div>
+                <span className="signal-text">
+                  New signal: {lastConfusionSignal.confusionLevel === 0 ? 'Clear ✓' : lastConfusionSignal.confusionLevel === 1 ? 'Confused ⚠️' : 'Very Confused ❗'}
+                </span>
+              </div>
+            )}
+
+            {confusionSignals.length === 0 && (
+              <div className="no-signals-state">
+                <span className="no-signals-icon">💭</span>
+                <span className="no-signals-text">Waiting for student feedback...</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+                {/* Session Stats Card */}
+                <div className="dashboard-card stats-card">
+                  <div className="card-header">
+                    <span className="card-icon" aria-hidden="true">📊</span>
+                    <span className="card-title">Session Stats</span>
+                  </div>
+                  <div className="card-content">
+                    <div className="stats-grid">
+                      <div className="stat-item">
+                        <div className="stat-value">{lecturerQuizzes.length}</div>
+                        <div className="stat-label">Questions Generated</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{confusionSignals.length}</div>
+                        <div className="stat-label">Student Signals</div>
+                      </div>
+                    </div>
+                    {finalTranscription && (
+                      <div className="transcription-preview">
+                        <div className="preview-label">Latest Transcript</div>
+                        <div className="preview-text">
+                          {finalTranscription.split(' ').slice(-8).join(' ')}...
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
             
@@ -851,6 +989,49 @@ function App() {
               <p>Student ID: <span className="sr-only">Your student identifier: </span>{studentId}</p>
             </div>
             
+            {/* Confusion Meter for Students */}
+            <div className="confusion-meter-student">
+              <div className="confusion-header">
+                <span aria-hidden="true">🤔</span>
+                <span>How are you feeling about the lecture?</span>
+              </div>
+              <div className="confusion-buttons">
+                <button 
+                  className={`confusion-button clear ${confusionLevel === 0 ? 'active' : ''}`}
+                  onClick={() => handleConfusionSignal(0)}
+                  aria-label="Signal that you understand clearly"
+                  title="I understand clearly"
+                >
+                  <span className="button-icon">😊</span>
+                  <span className="button-label">Clear</span>
+                  {confusionLevel === 0 && <span className="selection-indicator">✓</span>}
+                </button>
+                <button 
+                  className={`confusion-button confused ${confusionLevel === 1 ? 'active' : ''}`}
+                  onClick={() => handleConfusionSignal(1)}
+                  aria-label="Signal that you are confused"
+                  title="I'm a bit confused"
+                >
+                  <span className="button-icon">😐</span>
+                  <span className="button-label">Confused</span>
+                  {confusionLevel === 1 && <span className="selection-indicator">✓</span>}
+                </button>
+                <button 
+                  className={`confusion-button very-confused ${confusionLevel === 2 ? 'active' : ''}`}
+                  onClick={() => handleConfusionSignal(2)}
+                  aria-label="Signal that you are very confused"
+                  title="I'm very confused"
+                >
+                  <span className="button-icon">😵</span>
+                  <span className="button-label">Very Confused</span>
+                  {confusionLevel === 2 && <span className="selection-indicator">✓</span>}
+                </button>
+              </div>
+              <div className="confusion-help">
+                <small>Anonymously let your lecturer know how you're following along</small>
+              </div>
+            </div>
+            
             {currentQuiz && (
               <div className="quiz-section">
                 {allQuizzes.length > 1 && (
@@ -1021,6 +1202,9 @@ function App() {
                 setShowAnalytics(false);
                 setStudentAnalytics(null);
                 setShowStudentResults(false);
+                setConfusionSignals([]);
+                setLastConfusionSignal(null);
+                setConfusionLevel(0);
                 setError('');
                 // Keep dark mode preference - don't reset it
               }}
