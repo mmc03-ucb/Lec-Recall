@@ -402,9 +402,13 @@ const setupSocketHandlers = (io) => {
             }));
             
             // Find question with most wrong answers (lowest accuracy rate)
-            const mostProblematicQuestion = processedQuestions
-              .filter(q => q.totalAnswers > 0)
-              .sort((a, b) => a.accuracyRate - b.accuracyRate)[0];
+            // Only identify problematic questions if there are actually incorrect answers
+            const questionsWithErrors = processedQuestions
+              .filter(q => q.totalAnswers > 0 && q.accuracyRate < 100);
+            
+            const mostProblematicQuestion = questionsWithErrors.length > 0 
+              ? questionsWithErrors.sort((a, b) => a.accuracyRate - b.accuracyRate)[0]
+              : null;
             
             const sessionAnalytics = {
               sessionInfo: {

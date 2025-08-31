@@ -37,15 +37,21 @@ function App() {
   const streamRef = useRef(null);
   const isTranscribingRef = useRef(false);
 
-  // Your Deepgram API key (temporary direct assignment)
-  const DEEPGRAM_API_KEY = '3cc6642a0267111230739ecf52ecc7e1de427d3b';
+  // Load API keys from environment variables
+  const DEEPGRAM_API_KEY = process.env.REACT_APP_DEEPGRAM_API_KEY;
+  const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5001';
   
   // Debug environment variable loading
   useEffect(() => {
-    console.log('🔑 API Key Status: Loaded directly ✅');
-    console.log('- DEEPGRAM_API_KEY: Available');
-    console.log('- Backend URL: http://localhost:5001');
-  }, []);
+    console.log('🔑 Environment Variables Status:');
+    console.log('- DEEPGRAM_API_KEY:', DEEPGRAM_API_KEY ? 'Available ✅' : 'Missing ❌');
+    console.log('- BACKEND_URL:', BACKEND_URL);
+    
+    if (!DEEPGRAM_API_KEY) {
+      console.error('❌ REACT_APP_DEEPGRAM_API_KEY not found in environment variables');
+      setError('Deepgram API key not configured. Please check environment variables.');
+    }
+  }, [DEEPGRAM_API_KEY, BACKEND_URL]);
 
   const startMediaRecorder = (stream, connection) => {
     // Set up MediaRecorder with fallback MIME types
@@ -117,7 +123,11 @@ function App() {
       return;
     }
 
-    // API key is now directly available
+    // Validate API key from environment variables
+    if (!DEEPGRAM_API_KEY) {
+      setError('Deepgram API key not configured. Please check REACT_APP_DEEPGRAM_API_KEY environment variable.');
+      return;
+    }
 
     try {
       // Get microphone stream
@@ -717,7 +727,7 @@ function App() {
                             )}
                           </div>
                           
-                          {sessionAnalytics.mostProblematicQuestion?.questionId === question.questionId && (
+                          {sessionAnalytics.mostProblematicQuestion?.questionId === question.questionId && question.accuracyRate < 100 && (
                             <div className="review-recommendation">
                               🔍 <strong>Recommended for Review:</strong> This question had the lowest accuracy rate and should be reviewed in the next class.
                             </div>
@@ -728,8 +738,8 @@ function App() {
                   </div>
                 )}
                 
-                {/* Most Problematic Question Highlight */}
-                {sessionAnalytics.mostProblematicQuestion && (
+                {/* Most Problematic Question Highlight or Perfect Performance */}
+                {sessionAnalytics.mostProblematicQuestion ? (
                   <div className="most-problematic-summary">
                     <h4>⚠️ Question Needing Most Review</h4>
                     <div className="problematic-question">
@@ -738,6 +748,16 @@ function App() {
                       <p><strong>Correct Answer:</strong> {sessionAnalytics.mostProblematicQuestion.correctAnswer}</p>
                       <p className="recommendation">
                         💡 <strong>Recommendation:</strong> Review this concept in your next class as {sessionAnalytics.mostProblematicQuestion.incorrectAnswers} students answered incorrectly.
+                      </p>
+                    </div>
+                  </div>
+                ) : sessionAnalytics.questionAnalytics.length > 0 && (
+                  <div className="perfect-performance-summary">
+                    <h4>🎉 Excellent Class Performance!</h4>
+                    <div className="perfect-message">
+                      <p><strong>Outstanding!</strong> All students answered every question correctly.</p>
+                      <p className="celebration">
+                        🌟 <strong>No review needed:</strong> Your students have demonstrated excellent understanding of all the concepts covered in this session.
                       </p>
                     </div>
                   </div>

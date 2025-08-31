@@ -3,7 +3,18 @@ const axios = require('axios');
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent';
 
+// Validate API key on module load
+if (!GEMINI_API_KEY) {
+  console.error('❌ GEMINI_API_KEY not found in environment variables');
+  console.error('Please add GEMINI_API_KEY to your .env file');
+}
+
 async function detectQuestion(transcriptText) {
+  if (!GEMINI_API_KEY) {
+    console.error('❌ Cannot detect question: GEMINI_API_KEY not configured');
+    return { hasQuestion: false, question: null };
+  }
+  
   const prompt = `The user is speaking to an audience in an educational/lecture setting. 
 
 You must determine whether or not what the user says contains a RELEVANT EDUCATIONAL QUESTION for the audience.
@@ -68,6 +79,11 @@ Response format:
 }
 
 async function generateQuiz(question) {
+  if (!GEMINI_API_KEY) {
+    console.error('❌ Cannot generate quiz: GEMINI_API_KEY not configured');
+    return null;
+  }
+  
   const prompt = `The user will give you a question. 
   
 Generate 4 SHORT multiple choice answers for the question.
@@ -135,14 +151,19 @@ Response format:
 }
 
 async function generateSummary(transcriptText) {
-  const prompt = `Summarize this lecture transcript in a clear, organized way. Include:
+  if (!GEMINI_API_KEY) {
+    console.error('❌ Cannot generate summary: GEMINI_API_KEY not configured');
+    return 'Unable to generate summary - API key not configured.';
+  }
+  
+  const prompt = `Summarize this lecture transcript in a clear, organized and conciseway. Include:
 1. Main topics covered
 2. Key concepts explained
 3. Important points emphasized
 
 Transcript: "${transcriptText}"
 
-Provide a concise but comprehensive summary suitable for student review. Start directly with the summary. In plain text without any formatting`;
+Provide a concise and brief summary suitable for student review. Start directly with the summary. In plain text without any formatting`;
 
   try {
     const response = await axios.post(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
@@ -166,6 +187,11 @@ Provide a concise but comprehensive summary suitable for student review. Start d
 }
 
 async function generateStudentReview(missedQuestions, summary) {
+  if (!GEMINI_API_KEY) {
+    console.error('❌ Cannot generate student review: GEMINI_API_KEY not configured');
+    return 'Unable to generate personalized review - API key not configured.';
+  }
+  
   const prompt = `Based on the questions the student got wrong and the lecture summary, provide personalized study recommendations.
 
 Missed Questions: ${JSON.stringify(missedQuestions)}
