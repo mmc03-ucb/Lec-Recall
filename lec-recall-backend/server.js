@@ -559,6 +559,7 @@ const getStudentSessions = async (req, res) => {
 const getStudentAnalytics = async (req, res) => {
   try {
     const { sessionId, studentId } = req.params;
+    const { includeReview } = req.query; // Optional query parameter
     
     const query = `
       SELECT 
@@ -580,7 +581,7 @@ const getStudentAnalytics = async (req, res) => {
       ORDER BY q.created_at ASC
     `;
     
-    db.all(query, [sessionId, studentId], (err, results) => {
+    db.all(query, [sessionId, studentId], async (err, results) => {
       if (err) {
         console.error('Error getting student analytics:', err);
         res.status(500).json({ error: 'Database error' });
@@ -602,11 +603,50 @@ const getStudentAnalytics = async (req, res) => {
           answeredAt: r.answeredAt
         }));
         
-        res.json({
-          summary,
-          detailedAnswers,
-          missedQuestions: detailedAnswers.filter(a => !a.isCorrect)
-        });
+        const missedQuestions = detailedAnswers.filter(a => !a.isCorrect);
+        
+        let personalizedReview = null;
+        let lectureSummary = null;
+        
+        // Generate personalized review if requested
+        if (includeReview === 'true' && missedQuestions.length > 0) {
+          try {
+            // Get lecture summary first
+            const transcriptQuery = 'SELECT text_chunk FROM transcripts WHERE session_id = ? ORDER BY timestamp';
+            
+            db.all(transcriptQuery, [sessionId], async (err, transcripts) => {
+              if (transcripts && transcripts.length > 0) {
+                const fullTranscript = transcripts.map(t => t.text_chunk).join(' ');
+                lectureSummary = await generateSummary(fullTranscript);
+                personalizedReview = await generateStudentReview(missedQuestions, lectureSummary);
+              }
+              
+              res.json({
+                summary,
+                detailedAnswers,
+                missedQuestions,
+                lectureSummary,
+                personalizedReview
+              });
+            });
+          } catch (error) {
+            console.error('Error generating personalized review:', error);
+            // Return analytics without review if generation fails
+            res.json({
+              summary,
+              detailedAnswers,
+              missedQuestions,
+              lectureSummary: null,
+              personalizedReview: null
+            });
+          }
+        } else {
+          res.json({
+            summary,
+            detailedAnswers,
+            missedQuestions
+          });
+        }
       }
     });
   } catch (error) {
@@ -658,6 +698,152 @@ app.post('/api/sessions/:sessionId/summary', async (req, res) => {
   } catch (error) {
     console.error('Error generating summary:', error);
     res.status(500).json({ error: 'Failed to generate summary' });
+  }
+});
+
+// Generate personalized student review
+app.post('/api/sessions/:sessionId/student/:studentId/review', async (req, res) => {
+  try {
+    const { sessionId, studentId } = req.params;
+    
+    // First get the student's missed questions
+    const studentAnalyticsQuery = `
+      SELECT 
+        q.formatted_question as question,
+        q.correct_answer as correctAnswer,
+        sa.selected_answer as selectedAnswer
+      FROM students st
+      LEFT JOIN student_answers sa ON st.id = sa.student_id
+      LEFT JOIN questions q ON sa.question_id = q.id
+      WHERE st.session_id = ? AND st.name = ? AND sa.selected_answer != q.correct_answer
+      ORDER BY q.created_at ASC
+    `;
+    
+    db.all(studentAnalyticsQuery, [sessionId, studentId], async (err, missedQuestions) => {
+      if (err) {
+        console.error('Error getting student missed questions:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+      
+      // Get the lecture summary
+      const transcriptQuery = 'SELECT text_chunk FROM transcripts WHERE session_id = ? ORDER BY timestamp';
+      
+      db.all(transcriptQuery, [sessionId], async (err, transcripts) => {
+        if (err) {
+          console.error('Error getting transcripts:', err);
+          return res.status(500).json({ error: 'Database error' });
+        }
+        
+        if (transcripts.length === 0) {
+          return res.status(404).json({ error: 'No transcripts found for this session' });
+        }
+        
+        // Combine all transcript chunks
+        const fullTranscript = transcripts.map(t => t.text_chunk).join(' ');
+        
+        // Generate summary first
+        const summary = await generateSummary(fullTranscript);
+        
+        // Generate personalized review based on missed questions and summary
+        const personalizedReview = await generateStudentReview(missedQuestions, summary);
+        
+        res.json({ 
+          summary,
+          personalizedReview,
+          missedQuestions: missedQuestions.map(q => ({
+            question: q.question,
+            correctAnswer: q.correctAnswer,
+            selectedAnswer: q.selectedAnswer
+          }))
+        });
+      });
+    });
+  } catch (error) {
+    console.error('Error generating student review:', error);
+    res.status(500).json({ error: 'Failed to generate student review' });
+  }
+});
+
+// Get comprehensive session analytics with summary and student reviews
+app.get('/api/sessions/:sessionId/comprehensive-analytics', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    // Get session details
+    const sessionQuery = 'SELECT * FROM sessions WHERE id = ?';
+    
+    db.get(sessionQuery, [sessionId], async (err, session) => {
+      if (err || !session) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      
+      // Get all students in the session
+      const studentsQuery = 'SELECT * FROM students WHERE session_id = ?';
+      
+      db.all(studentsQuery, [sessionId], async (err, students) => {
+        if (err) {
+          console.error('Error getting students:', err);
+          return res.status(500).json({ error: 'Database error' });
+        }
+        
+        // Get lecture summary
+        const transcriptQuery = 'SELECT text_chunk FROM transcripts WHERE session_id = ? ORDER BY timestamp';
+        
+        db.all(transcriptQuery, [sessionId], async (err, transcripts) => {
+          if (err) {
+            console.error('Error getting transcripts:', err);
+            return res.status(500).json({ error: 'Database error' });
+          }
+          
+          let summary = null;
+          if (transcripts.length > 0) {
+            const fullTranscript = transcripts.map(t => t.text_chunk).join(' ');
+            summary = await generateSummary(fullTranscript);
+          }
+          
+          // Get overall session analytics
+          const analyticsQuery = `
+            SELECT 
+              COUNT(DISTINCT q.id) as total_questions,
+              COUNT(DISTINCT st.id) as total_students,
+              COUNT(sa.id) as total_answers,
+              ROUND(CAST(COUNT(CASE WHEN sa.selected_answer = q.correct_answer THEN 1 END) AS FLOAT) / 
+                    COUNT(sa.id) * 100, 2) as overall_accuracy
+            FROM sessions s
+            LEFT JOIN students st ON s.id = st.session_id
+            LEFT JOIN questions q ON s.id = q.session_id
+            LEFT JOIN student_answers sa ON q.id = sa.question_id AND st.id = sa.student_id
+            WHERE s.id = ?
+          `;
+          
+          db.get(analyticsQuery, [sessionId], (err, analytics) => {
+            if (err) {
+              console.error('Error getting session analytics:', err);
+              return res.status(500).json({ error: 'Database error' });
+            }
+            
+            res.json({
+              session,
+              summary,
+              analytics: {
+                totalQuestions: analytics.total_questions || 0,
+                totalStudents: analytics.total_students || 0,
+                totalAnswers: analytics.total_answers || 0,
+                overallAccuracy: analytics.overall_accuracy || 0
+              },
+              students: students.map(student => ({
+                id: student.id,
+                name: student.name,
+                joinedAt: student.joined_at
+              }))
+            });
+          });
+        });
+      });
+    });
+  } catch (error) {
+    console.error('Error getting comprehensive analytics:', error);
+    res.status(500).json({ error: 'Failed to get comprehensive analytics' });
   }
 });
 
