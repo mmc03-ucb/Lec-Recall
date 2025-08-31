@@ -26,6 +26,10 @@ function App() {
   const [questionDetected, setQuestionDetected] = useState(false);
   const [lecturerQuizzes, setLecturerQuizzes] = useState([]);
   const [currentLecturerQuiz, setCurrentLecturerQuiz] = useState(null);
+  const [sessionAnalytics, setSessionAnalytics] = useState(null);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [studentAnalytics, setStudentAnalytics] = useState(null);
+  const [showStudentResults, setShowStudentResults] = useState(false);
   
   // Refs
   const connectionRef = useRef(null);
@@ -257,6 +261,18 @@ function App() {
     newSocket.on('recording-stopped', () => {
       console.log('Recording stopped');
     });
+    
+    newSocket.on('session-stopped', (analyticsData) => {
+      console.log('📊 Session stopped with analytics:', analyticsData);
+      setSessionAnalytics(analyticsData);
+      setShowAnalytics(true);
+      stopTranscription(); // Stop any ongoing recording
+    });
+    
+    newSocket.on('session-stop-error', (data) => {
+      console.error('Error stopping session:', data.error);
+      setError('Failed to stop session: ' + data.error);
+    });
   };
 
   const handleSessionJoined = (data, newSocket) => {
@@ -346,6 +362,18 @@ function App() {
     newSocket.on('recording-stopped', () => {
       console.log('Recording stopped');
     });
+    
+    newSocket.on('session-ended', (data) => {
+      console.log('Session ended:', data.message);
+      setError(data.message);
+    });
+    
+    newSocket.on('session-ended-with-analytics', (data) => {
+      console.log('📊 Session ended with student analytics:', data);
+      setStudentAnalytics(data.analytics);
+      setShowStudentResults(true);
+      setError(''); // Clear any previous errors
+    });
   };
 
   const handleSubmitAnswer = (questionId, studentId, answer) => {
@@ -409,6 +437,13 @@ function App() {
 
   const handleStop = () => {
     handleStopRecording();
+  };
+
+  const handleStopSession = () => {
+    if (socket && sessionData) {
+      console.log('🛑 Stopping session:', sessionData.sessionId);
+      socket.emit('stop-session', sessionData.sessionId);
+    }
   };
 
   // Cleanup on unmount
@@ -487,6 +522,17 @@ function App() {
                   Stop Recording
                 </button>
               )}
+              
+              {/* Stop Session Button - Always available when session is active */}
+              <button 
+                className="stop-session-button"
+                onClick={handleStopSession}
+                disabled={showAnalytics}
+              >
+                {showAnalytics ? 'Session Ended' : 'Stop Session & View Analytics'}
+              </button>
+              
+
             </div>
             
             {error && (
@@ -564,7 +610,7 @@ function App() {
             )}
             
             {/* Show quiz history for lecturer */}
-            {lecturerQuizzes.length > 1 && (
+            {lecturerQuizzes.length > 1 && !showAnalytics && (
               <div className="lecturer-quiz-history">
                 <h4>Quiz History ({lecturerQuizzes.length} total)</h4>
                 <div className="quiz-history-list">
@@ -583,11 +629,132 @@ function App() {
                 </div>
               </div>
             )}
+            
+            {/* Session Analytics Display */}
+            {showAnalytics && sessionAnalytics && (
+              <div className="session-analytics">
+                <h3>📊 Session Analytics</h3>
+                
+                {/* Session Summary */}
+                <div className="analytics-summary">
+                  <h4>Session Summary</h4>
+                  <div className="summary-stats">
+                    <div className="stat-item">
+                      <span className="stat-label">Total Questions:</span>
+                      <span className="stat-value">{sessionAnalytics.summary.totalQuestions}</span>
+                    </div>
+                    <div className="stat-item">
+                      <span className="stat-label">Total Students:</span>
+                      <span className="stat-value">{sessionAnalytics.summary.totalStudents}</span>
+                    </div>
+                    <div className="stat-item">
+                      <span className="stat-label">Total Answers:</span>
+                      <span className="stat-value">{sessionAnalytics.summary.totalAnswers}</span>
+                    </div>
+                    <div className="stat-item">
+                      <span className="stat-label">Participation Rate:</span>
+                      <span className="stat-value">{sessionAnalytics.summary.participationRate}%</span>
+                    </div>
+                    {sessionAnalytics.sessionInfo.duration && (
+                      <div className="stat-item">
+                        <span className="stat-label">Duration:</span>
+                        <span className="stat-value">{sessionAnalytics.sessionInfo.duration} minutes</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Question Analytics */}
+                {sessionAnalytics.questionAnalytics.length > 0 && (
+                  <div className="question-analytics">
+                    <h4>Question Performance</h4>
+                    <div className="questions-list">
+                      {sessionAnalytics.questionAnalytics.map((question, index) => (
+                        <div 
+                          key={question.questionId} 
+                          className={`question-analytics-item ${
+                            sessionAnalytics.mostProblematicQuestion?.questionId === question.questionId 
+                              ? 'most-problematic' 
+                              : ''
+                          }`}
+                        >
+                          <div className="question-header">
+                            <div className="question-text">
+                              <strong>Q{index + 1}:</strong> {question.question}
+                            </div>
+                            <div className="question-stats">
+                              <span className="correct-answers">
+                                ✅ {question.correctAnswers} correct
+                              </span>
+                              <span className="incorrect-answers">
+                                ❌ {question.incorrectAnswers} incorrect
+                              </span>
+                              <span className="accuracy-rate">
+                                {question.accuracyRate}% accuracy
+                              </span>
+                            </div>
+                          </div>
+                          
+                          <div className="answer-breakdown">
+                            <div className="correct-answer">
+                              <strong>Correct Answer: {question.correctAnswer}</strong> - {question.options[question.correctAnswer]}
+                            </div>
+                            
+                            {question.totalAnswers > 0 && (
+                              <div className="answer-distribution">
+                                <h5>Answer Distribution:</h5>
+                                {Object.entries(question.answerDistribution).map(([option, count]) => (
+                                  <div 
+                                    key={option} 
+                                    className={`option-stat ${option === question.correctAnswer ? 'correct-option' : ''}`}
+                                  >
+                                    <span className="option-label">{option}:</span>
+                                    <span className="option-count">{count} students</span>
+                                    <span className="option-text">"{question.options[option]}"</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          
+                          {sessionAnalytics.mostProblematicQuestion?.questionId === question.questionId && (
+                            <div className="review-recommendation">
+                              🔍 <strong>Recommended for Review:</strong> This question had the lowest accuracy rate and should be reviewed in the next class.
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Most Problematic Question Highlight */}
+                {sessionAnalytics.mostProblematicQuestion && (
+                  <div className="most-problematic-summary">
+                    <h4>⚠️ Question Needing Most Review</h4>
+                    <div className="problematic-question">
+                      <p><strong>Question:</strong> {sessionAnalytics.mostProblematicQuestion.question}</p>
+                      <p><strong>Accuracy Rate:</strong> {sessionAnalytics.mostProblematicQuestion.accuracyRate}%</p>
+                      <p><strong>Correct Answer:</strong> {sessionAnalytics.mostProblematicQuestion.correctAnswer}</p>
+                      <p className="recommendation">
+                        💡 <strong>Recommendation:</strong> Review this concept in your next class as {sessionAnalytics.mostProblematicQuestion.incorrectAnswers} students answered incorrectly.
+                      </p>
+                    </div>
+                  </div>
+                )}
+                
+                {sessionAnalytics.questionAnalytics.length === 0 && (
+                  <div className="no-questions-message">
+                    <p>No questions were generated during this session.</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
         
         {/* Session Active - Student View */}
-        {userType === 'student' && sessionData && (
+        {userType === 'student' && sessionData && !showStudentResults && (
           <div className="student-view">
             <div className="session-info">
               <h3>Connected to Session</h3>
@@ -638,6 +805,108 @@ function App() {
           </div>
         )}
         
+        {/* Student Results View */}
+        {userType === 'student' && showStudentResults && studentAnalytics && (
+          <div className="student-results">
+            <h3>📊 Your Session Results</h3>
+            
+            {/* Student Performance Summary */}
+            <div className="student-summary">
+              <h4>Performance Summary</h4>
+              <div className="student-stats">
+                <div className="student-stat-item">
+                  <span className="stat-label">Questions Answered:</span>
+                  <span className="stat-value">{studentAnalytics.summary.answeredQuestions} / {studentAnalytics.summary.totalQuestions}</span>
+                </div>
+                <div className="student-stat-item">
+                  <span className="stat-label">Correct Answers:</span>
+                  <span className="stat-value correct">{studentAnalytics.summary.correctAnswers}</span>
+                </div>
+                <div className="student-stat-item">
+                  <span className="stat-label">Accuracy Rate:</span>
+                  <span className={`stat-value ${studentAnalytics.summary.accuracyRate >= 70 ? 'good' : studentAnalytics.summary.accuracyRate >= 50 ? 'average' : 'needs-improvement'}`}>
+                    {studentAnalytics.summary.accuracyRate}%
+                  </span>
+                </div>
+              </div>
+            </div>
+            
+            {/* Question by Question Results */}
+            <div className="question-results">
+              <h4>Question-by-Question Results</h4>
+              <div className="results-list">
+                {studentAnalytics.questionResults.map((result, index) => (
+                  <div 
+                    key={result.questionId} 
+                    className={`result-item ${result.isCorrect ? 'correct' : result.studentAnswer ? 'incorrect' : 'unanswered'}`}
+                  >
+                    <div className="result-header">
+                      <div className="result-icon">
+                        {result.isCorrect ? '✅' : result.studentAnswer ? '❌' : '⏸️'}
+                      </div>
+                      <div className="result-text">
+                        <strong>Q{index + 1}:</strong> {result.question}
+                      </div>
+                    </div>
+                    
+                    <div className="result-details">
+                      <div className="answer-comparison">
+                        {result.studentAnswer && (
+                          <div className={`student-answer ${result.isCorrect ? 'correct' : 'incorrect'}`}>
+                            <strong>Your Answer:</strong> {result.studentAnswer} - {result.options[result.studentAnswer]}
+                          </div>
+                        )}
+                        {!result.studentAnswer && (
+                          <div className="no-answer">
+                            <strong>Not Answered</strong>
+                          </div>
+                        )}
+                        <div className="correct-answer-display">
+                          <strong>Correct Answer:</strong> {result.correctAnswer} - {result.options[result.correctAnswer]}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            {/* Lecture Summary */}
+            {studentAnalytics.lectureSummary && (
+              <div className="lecture-summary">
+                <h4>📝 Lecture Summary</h4>
+                <div className="summary-content">
+                  {studentAnalytics.lectureSummary}
+                </div>
+              </div>
+            )}
+            
+            {/* Performance Message */}
+            <div className="performance-message">
+              {studentAnalytics.summary.accuracyRate >= 80 && (
+                <div className="excellent-performance">
+                  🎉 <strong>Excellent work!</strong> You demonstrated strong understanding of the material.
+                </div>
+              )}
+              {studentAnalytics.summary.accuracyRate >= 60 && studentAnalytics.summary.accuracyRate < 80 && (
+                <div className="good-performance">
+                  👍 <strong>Good job!</strong> You're on the right track. Review the questions you missed.
+                </div>
+              )}
+              {studentAnalytics.summary.accuracyRate < 60 && studentAnalytics.summary.answeredQuestions > 0 && (
+                <div className="needs-improvement">
+                  📚 <strong>Keep studying!</strong> Review the lecture summary and focus on the concepts you missed.
+                </div>
+              )}
+              {studentAnalytics.summary.answeredQuestions === 0 && (
+                <div className="no-participation">
+                  ⏰ <strong>Missed the session?</strong> Review the lecture summary to catch up on what was covered.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        
         {/* Reset Button */}
         {sessionData && (
           <div className="reset-section">
@@ -656,6 +925,11 @@ function App() {
                 setTranscription('');
                 setLecturerQuizzes([]);
                 setCurrentLecturerQuiz(null);
+                setSessionAnalytics(null);
+                setShowAnalytics(false);
+                setStudentAnalytics(null);
+                setShowStudentResults(false);
+                setError('');
               }}
             >
               Start Over

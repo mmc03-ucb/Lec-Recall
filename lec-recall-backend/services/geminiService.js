@@ -142,7 +142,7 @@ async function generateSummary(transcriptText) {
 
 Transcript: "${transcriptText}"
 
-Provide a concise but comprehensive summary suitable for student review.`;
+Provide a concise but comprehensive summary suitable for student review. Start directly with the summary. In plain text without any formatting`;
 
   try {
     const response = await axios.post(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
