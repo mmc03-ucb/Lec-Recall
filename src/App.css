@@ -513,6 +513,124 @@
   margin: 0 auto;
 }
 
+/* Lecturer Quiz Display */
+.lecturer-quiz-section {
+  margin: 2rem 0;
+  padding: 1.5rem;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 12px;
+  border: 2px solid #e2e8f0;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+}
+
+.lecturer-quiz-section h3 {
+  color: #2d3748;
+  margin: 0 0 1rem 0;
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.lecturer-quiz-display {
+  text-align: left;
+}
+
+.quiz-header {
+  margin-bottom: 1rem;
+}
+
+.quiz-header h4 {
+  color: #2d3748;
+  font-size: 1.2rem;
+  margin: 0 0 0.5rem 0;
+}
+
+.quiz-meta {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.9rem;
+  color: #718096;
+  flex-wrap: wrap;
+}
+
+.quiz-options {
+  margin: 1rem 0;
+}
+
+.quiz-options .option {
+  padding: 0.5rem;
+  margin: 0.25rem 0;
+  border-radius: 6px;
+  background: #f7fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.quiz-options .option.correct {
+  background: #c6f6d5;
+  border-color: #38a169;
+  color: #22543d;
+  font-weight: 500;
+}
+
+.original-text {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: #f1f5f9;
+  border-radius: 6px;
+  color: #64748b;
+  font-style: italic;
+}
+
+.lecturer-quiz-history {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background: rgba(248, 250, 252, 0.8);
+  border-radius: 8px;
+}
+
+.lecturer-quiz-history h4 {
+  color: #2d3748;
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+}
+
+.quiz-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.quiz-history-item {
+  padding: 0.75rem;
+  background: white;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.quiz-history-item:hover {
+  border-color: #667eea;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.quiz-history-item.current {
+  border-color: #667eea;
+  background: #f0f4ff;
+}
+
+.history-question {
+  font-weight: 500;
+  color: #2d3748;
+  margin-bottom: 0.25rem;
+}
+
+.history-meta {
+  font-size: 0.85rem;
+  color: #718096;
+}
+
 /* Mobile responsive for new components */
 @media (max-width: 768px) {
   .role-buttons {
@@ -532,5 +650,14 @@
 
   .nav-buttons {
     justify-content: center;
+  }
+
+  .quiz-meta {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .lecturer-quiz-section {
+    padding: 1rem;
   }
 }

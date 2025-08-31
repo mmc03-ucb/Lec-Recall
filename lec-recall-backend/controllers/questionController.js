@@ -213,75 +213,36 @@ const generateStudentReviewHandler = async (req, res) => {
   }
 };
 
-// Update/modify a question
-const updateQuestion = async (req, res) => {
+// Get current active quiz for a session
+const getCurrentQuiz = async (req, res) => {
   try {
-    const { questionId } = req.params;
-    const { question, optionA, optionB, optionC, optionD, correctAnswer } = req.body;
+    const { sessionId } = req.params;
     
-    if (!question || !optionA || !optionB || !optionC || !optionD || !correctAnswer) {
-      return res.status(400).json({ error: 'All fields are required' });
-    }
-    
-    if (!['A', 'B', 'C', 'D'].includes(correctAnswer)) {
-      return res.status(400).json({ error: 'Correct answer must be A, B, C, or D' });
-    }
-    
-    const updateQuery = `
-      UPDATE questions 
-      SET formatted_question = ?, option_a = ?, option_b = ?, option_c = ?, option_d = ?, correct_answer = ?
-      WHERE id = ?
-    `;
-    
-    db.run(updateQuery, [question, optionA, optionB, optionC, optionD, correctAnswer, questionId], function(err) {
-      if (err) {
-        console.error('Error updating question:', err);
-        res.status(500).json({ error: 'Failed to update question' });
-      } else if (this.changes === 0) {
-        res.status(404).json({ error: 'Question not found' });
-      } else {
-        res.json({ 
-          questionId,
-          message: 'Question updated successfully',
-          updatedQuestion: {
-            question,
-            options: { A: optionA, B: optionB, C: optionC, D: optionD },
-            correctAnswer
-          }
-        });
-      }
-    });
-  } catch (error) {
-    console.error('Error in updateQuestion:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-};
-
-// Get question details for editing
-const getQuestionDetails = async (req, res) => {
-  try {
-    const { questionId } = req.params;
-    
+    // Get the most recent question for this session that might still be active
     const query = `
       SELECT 
         id as questionId,
         formatted_question as question,
         option_a, option_b, option_c, option_d,
         correct_answer as correctAnswer,
-        created_at as createdAt,
-        timer_duration as timerDuration
+        created_at,
+        original_text as originalText
       FROM questions 
-      WHERE id = ?
+      WHERE session_id = ? 
+      ORDER BY created_at DESC 
+      LIMIT 1
     `;
     
-    db.get(query, [questionId], (err, question) => {
+    db.get(query, [sessionId], (err, question) => {
       if (err) {
-        console.error('Error getting question details:', err);
+        console.error('Error getting current quiz:', err);
         res.status(500).json({ error: 'Database error' });
       } else if (!question) {
-        res.status(404).json({ error: 'Question not found' });
+        res.json({ hasActiveQuiz: false, message: 'No quiz found for this session' });
       } else {
-        res.json({
+        // Format the response
+        const quizData = {
+          hasActiveQuiz: true,
           questionId: question.questionId,
           question: question.question,
           options: {
@@ -291,13 +252,15 @@ const getQuestionDetails = async (req, res) => {
             D: question.option_d
           },
           correctAnswer: question.correctAnswer,
-          createdAt: question.createdAt,
-          timerDuration: question.timerDuration
-        });
+          createdAt: question.created_at,
+          originalText: question.originalText
+        };
+        
+        res.json(quizData);
       }
     });
   } catch (error) {
-    console.error('Error in getQuestionDetails:', error);
+    console.error('Error in getCurrentQuiz:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -309,6 +272,5 @@ module.exports = {
   getSessionQuestions,
   generateLectureSummary,
   generateStudentReviewHandler,
-  updateQuestion,
-  getQuestionDetails
+  getCurrentQuiz
 };

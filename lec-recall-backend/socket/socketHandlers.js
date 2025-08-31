@@ -191,6 +191,22 @@ const setupSocketHandlers = (io) => {
                     startTime: startTime
                   });
                   
+                  // Also emit quiz info to the lecturer for monitoring
+                  socket.emit('quiz-created', {
+                    questionId,
+                    question: questionResult.question,
+                    options: {
+                      A: quiz.optionA,
+                      B: quiz.optionB,
+                      C: quiz.optionC,
+                      D: quiz.optionD
+                    },
+                    correctAnswer: quiz.correctAnswer,
+                    timeLimit: timeLimit,
+                    startTime: startTime,
+                    originalText: text
+                  });
+                  
                   // Set timer to auto-reveal results
                   setTimeout(() => {
                     // Check if this timer is still active (not replaced by newer question)
@@ -265,158 +281,56 @@ const setupSocketHandlers = (io) => {
       });
     });
 
-    // Lecturer modifies a question
-    socket.on('modify-question', async (data) => {
-      const { questionId, sessionId, newQuestion, newOptions, newCorrectAnswer } = data;
-      console.log('✏️ Lecturer modifying question:', questionId);
-      
-      try {
-        // Update question in database
-        const updateQuery = `
-          UPDATE questions 
-          SET formatted_question = ?, option_a = ?, option_b = ?, option_c = ?, option_d = ?, correct_answer = ?
-          WHERE id = ? AND session_id = ?
-        `;
-        
-        db.run(updateQuery, [
-          newQuestion,
-          newOptions.A,
-          newOptions.B, 
-          newOptions.C,
-          newOptions.D,
-          newCorrectAnswer,
-          questionId,
-          sessionId
-        ], function(err) {
-          if (err) {
-            console.error('Error updating question:', err);
-            socket.emit('question-update-error', { error: 'Failed to update question' });
-          } else if (this.changes === 0) {
-            socket.emit('question-update-error', { error: 'Question not found' });
-          } else {
-            console.log('✅ Question updated successfully:', questionId);
-            
-            // Emit updated quiz to all students in the session
-            io.to(sessionId).emit('quiz-updated', {
-              questionId,
-              question: newQuestion,
-              options: newOptions,
-              correctAnswer: newCorrectAnswer
-            });
-            
-            // Confirm to lecturer
-            socket.emit('question-updated', { 
-              questionId,
-              message: 'Question updated successfully' 
-            });
-          }
-        });
-      } catch (error) {
-        console.error('Error in modify-question:', error);
-        socket.emit('question-update-error', { error: 'Internal server error' });
-      }
+    // Lecturer stops recording
+    socket.on('stop-recording', (sessionId) => {
+      console.log('🛑 Stopping recording for session:', sessionId);
+      db.run('UPDATE sessions SET status = "ended", ended_at = CURRENT_TIMESTAMP WHERE id = ?', [sessionId]);
+      socket.to(sessionId).emit('recording-stopped');
     });
 
-    // Lecturer extends quiz time
-    socket.on('extend-quiz-time', (data) => {
-      const { questionId, sessionId, additionalTime } = data;
-      console.log('⏱️ Extending quiz time for question:', questionId, 'by', additionalTime, 'seconds');
-      
-      // Get current timer info
-      const currentTimer = activeQuizTimers.get(sessionId);
-      
-      if (currentTimer && currentTimer.questionId === questionId) {
-        // Extend the time limit
-        const newTimeLimit = currentTimer.timeLimit + (additionalTime * 1000);
-        
-        // Update the timer
-        activeQuizTimers.set(sessionId, {
-          ...currentTimer,
-          timeLimit: newTimeLimit
-        });
-        
-        // Notify all students about the time extension
-        io.to(sessionId).emit('quiz-time-extended', {
-          questionId,
-          additionalTime,
-          newTimeRemaining: Math.ceil((newTimeLimit - (Date.now() - currentTimer.startTime)) / 1000)
-        });
-        
-        // Confirm to lecturer
-        socket.emit('quiz-time-extended-confirm', {
-          questionId,
-          additionalTime,
-          message: `Quiz time extended by ${additionalTime} seconds`
-        });
-        
-        console.log('✅ Quiz time extended successfully');
-      } else {
-        socket.emit('quiz-time-extend-error', { 
-          error: 'No active quiz found for this question' 
-        });
-      }
-    });
-
-    // Lecturer manually ends quiz
-    socket.on('end-quiz-manually', (data) => {
-      const { questionId, sessionId } = data;
-      console.log('🛑 Lecturer manually ending quiz for question:', questionId);
-      
-      // Get the correct answer and reveal it to all students
-      db.get('SELECT correct_answer FROM questions WHERE id = ?', [questionId], (err, question) => {
-        if (err) {
-          console.error('Error getting question for manual end:', err);
-          return;
-        }
-        
-        // Remove from active timers
-        const currentTimer = activeQuizTimers.get(sessionId);
-        if (currentTimer && currentTimer.questionId === questionId) {
-          activeQuizTimers.delete(sessionId);
-        }
-        
-        // Reveal correct answer to all students in the session
-        io.to(sessionId).emit('quiz-results', { 
-          questionId, 
-          correctAnswer: question.correct_answer,
-          endedManually: true
-        });
-        
-        // Confirm to lecturer
-        socket.emit('quiz-ended-confirm', {
-          questionId,
-          message: 'Quiz ended manually'
-        });
-        
-        console.log('📊 Quiz ended manually by lecturer for question:', questionId);
-      });
-    });
-
-    // Get quiz status for lecturer
+    // Get current quiz status for lecturer
     socket.on('get-quiz-status', (data) => {
       const { sessionId } = data;
+      console.log('📊 Getting quiz status for session:', sessionId);
+      
       const currentTimer = activeQuizTimers.get(sessionId);
       
       if (currentTimer) {
         const elapsed = Date.now() - currentTimer.startTime;
         const remaining = Math.max(0, currentTimer.timeLimit - elapsed);
         
-        socket.emit('quiz-status', {
-          questionId: currentTimer.questionId,
-          timeRemaining: Math.ceil(remaining / 1000),
-          totalTime: Math.ceil(currentTimer.timeLimit / 1000),
-          isActive: remaining > 0
+        // Get quiz details from database
+        db.get('SELECT * FROM questions WHERE id = ?', [currentTimer.questionId], (err, question) => {
+          if (err) {
+            console.error('Error getting quiz details:', err);
+            socket.emit('quiz-status', { isActive: false });
+            return;
+          }
+          
+          if (question) {
+            socket.emit('quiz-status', {
+              isActive: true,
+              questionId: currentTimer.questionId,
+              question: question.formatted_question,
+              options: {
+                A: question.option_a,
+                B: question.option_b,
+                C: question.option_c,
+                D: question.option_d
+              },
+              correctAnswer: question.correct_answer,
+              timeRemaining: Math.ceil(remaining / 1000),
+              totalTime: Math.ceil(currentTimer.timeLimit / 1000),
+              startTime: currentTimer.startTime,
+              originalText: question.original_text
+            });
+          } else {
+            socket.emit('quiz-status', { isActive: false });
+          }
         });
       } else {
         socket.emit('quiz-status', { isActive: false });
       }
-    });
-
-    // Lecturer stops recording
-    socket.on('stop-recording', (sessionId) => {
-      console.log('🛑 Stopping recording for session:', sessionId);
-      db.run('UPDATE sessions SET status = "ended", ended_at = CURRENT_TIMESTAMP WHERE id = ?', [sessionId]);
-      socket.to(sessionId).emit('recording-stopped');
     });
 
     socket.on('disconnect', () => {

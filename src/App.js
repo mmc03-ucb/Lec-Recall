@@ -24,6 +24,8 @@ function App() {
   const [studentId, setStudentId] = useState(null);
   const [isProcessingTranscript, setIsProcessingTranscript] = useState(false);
   const [questionDetected, setQuestionDetected] = useState(false);
+  const [lecturerQuizzes, setLecturerQuizzes] = useState([]);
+  const [currentLecturerQuiz, setCurrentLecturerQuiz] = useState(null);
   
   // Refs
   const connectionRef = useRef(null);
@@ -237,6 +239,19 @@ function App() {
       console.log('❓ Question detected:', data.question);
       setQuestionDetected(true);
       setTimeout(() => setQuestionDetected(false), 3000); // Show for 3 seconds
+    });
+    
+    newSocket.on('quiz-created', (quizData) => {
+      console.log('🎯 Quiz created for lecturer:', quizData);
+      
+      // Add to lecturer's quiz list
+      setLecturerQuizzes(prev => [...prev, quizData]);
+      
+      // Set as current lecturer quiz
+      setCurrentLecturerQuiz(quizData);
+      
+      // Clear the question detected indicator since we now have the full quiz
+      setQuestionDetected(false);
     });
     
     newSocket.on('recording-stopped', () => {
@@ -518,6 +533,56 @@ function App() {
                 )}
               </div>
             )}
+            
+            {/* Display created quizzes for lecturer */}
+            {currentLecturerQuiz && (
+              <div className="lecturer-quiz-section">
+                <h3>Current Quiz</h3>
+                <div className="lecturer-quiz-display">
+                  <div className="quiz-header">
+                    <h4>📝 {currentLecturerQuiz.question}</h4>
+                    <div className="quiz-meta">
+                      <span>⏱️ Duration: {currentLecturerQuiz.timeLimit}s</span>
+                      <span>✅ Correct: {currentLecturerQuiz.correctAnswer}</span>
+                    </div>
+                  </div>
+                  <div className="quiz-options">
+                    {Object.entries(currentLecturerQuiz.options).map(([key, value]) => (
+                      <div 
+                        key={key} 
+                        className={`option ${key === currentLecturerQuiz.correctAnswer ? 'correct' : ''}`}
+                      >
+                        <strong>{key}:</strong> {value}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="original-text">
+                    <small><strong>From transcript:</strong> "{currentLecturerQuiz.originalText}"</small>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Show quiz history for lecturer */}
+            {lecturerQuizzes.length > 1 && (
+              <div className="lecturer-quiz-history">
+                <h4>Quiz History ({lecturerQuizzes.length} total)</h4>
+                <div className="quiz-history-list">
+                  {lecturerQuizzes.slice(-3).reverse().map((quiz, index) => (
+                    <div 
+                      key={quiz.questionId} 
+                      className={`quiz-history-item ${quiz.questionId === currentLecturerQuiz?.questionId ? 'current' : ''}`}
+                      onClick={() => setCurrentLecturerQuiz(quiz)}
+                    >
+                      <div className="history-question">{quiz.question}</div>
+                      <div className="history-meta">
+                        <span>Correct: {quiz.correctAnswer}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
         
@@ -589,6 +654,8 @@ function App() {
                 setStudentId(null);
                 setFinalTranscription('');
                 setTranscription('');
+                setLecturerQuizzes([]);
+                setCurrentLecturerQuiz(null);
               }}
             >
               Start Over
